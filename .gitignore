@@ -1,0 +1,93 @@
+# Dependencias y caché de instalación
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+.pnpm-store/
+
+# Next.js y artefactos de build
+/.next/
+/out/
+/build
+/dist
+*.tsbuildinfo
+next-env.d.ts
+
+# Pruebas y reportes locales
+/coverage
+/playwright-report
+/test-results
+/blob-report
+
+# Secretos y plantilla de entorno. Nada de esto se publica.
+.env
+.env.*
+.env.example
+*.pem
+*.key
+*.p8
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+id_ecdsa
+id_ecdsa.pub
+credentials.json
+service-account*.json
+*-credentials.json
+client_secret*.json
+.secrets/
+secrets/
+*.secret
+.netrc
+.pgpass
+.npmrc
+.yarnrc.yml
+
+# Sesiones, cookies y volcados que pueden copiar datos de la ficha
+.auth/
+cookies.txt
+*.cookies
+*.dump
+*.sql.gz
+*.backup
+/backups
+/tmp
+/temp
+
+# Notas locales del editor y de Next. No son la aplicación.
+/AGENTS.md
+
+# Esquema, notas y estado local de Supabase. Se quedan en este equipo.
+/docs/
+/supabase/migrations/
+supabase/.temp/
+supabase/.branches/
+supabase/.env
+.supabase/
+
+# Publicación y editores: pueden guardar tokens
+.vercel
+.turbo
+.idea/
+.vscode/
+.cursor/
+
+# Sistema y depuración
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
