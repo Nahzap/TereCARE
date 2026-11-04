@@ -31,11 +31,14 @@ const FUTURE_DAYS = 365
 const PLAN_DAYS = 365 * 5
 export const EXPENSE_AMOUNT_MAX = 99_999_999
 
+export const EXPENSE_NOTE_MAX = 200
+
 export type Expense = {
   id: string
   spentOn: string
   payment: ExpensePayment
   detail: ExpenseDetail
+  note: string
   amount: number
   personId: string
   buyerName: string
@@ -48,7 +51,15 @@ export const expenseBodySchema = z
     personId: z.uuid('Elige a quién compró'),
     spentOn: isoDateSchema,
     payment: z.enum(EXPENSE_PAYMENTS, 'Indica cómo se paga'),
-    detail: z.enum(EXPENSE_DETAILS, 'Elige el detalle'),
+    detail: z.enum(EXPENSE_DETAILS, 'Elige el tipo de gasto'),
+    note: z
+      .string()
+      .max(EXPENSE_NOTE_MAX, `El detalle no puede pasar de ${EXPENSE_NOTE_MAX} caracteres`)
+      .optional()
+      .transform((value) => {
+        const trimmed = (value ?? '').trim()
+        return trimmed ? trimmed : null
+      }),
     amount: z
       .number('Escribe el monto en pesos')
       .int('El monto no lleva decimales')
@@ -121,10 +132,12 @@ export function installmentAmounts(total: number, count: number) {
   return amounts
 }
 
-export type ExpensePortion = { date: string; bucket: 'paid' | 'pending' | 'installing'; amount: number }
+export type ExpensePortion = { date: string; bucket: 'paid' | 'pending' | 'installing' | 'covered'; amount: number }
 
 export function expensePortions(expense: Pick<Expense, 'spentOn' | 'payment' | 'amount' | 'installments' | 'endsOn'>): ExpensePortion[] {
-  if (expense.payment === 'cubierto') return []
+  if (expense.payment === 'cubierto') {
+    return [{ date: expense.spentOn, bucket: 'covered', amount: expense.amount }]
+  }
   if (expense.payment !== 'pagandose') {
     return [{ date: expense.spentOn, bucket: expense.payment === 'pagado' ? 'paid' : 'pending', amount: expense.amount }]
   }
@@ -166,8 +179,17 @@ export function expenseGroups(expenses: readonly Expense[], today: string): Expe
   ].filter((group): group is ExpenseGroup => group != null)
 }
 
-export type ExpenseDay = { day: string; paid: number; pending: number; installing: number }
-export type ExpenseSlice = { key: string; label: string; paid: number; pending: number; installing: number }
+export type ExpenseDay = { day: string; paid: number; pending: number; installing: number; covered: number }
+export type ExpenseSlice = {
+  key: string
+  label: string
+  paid: number
+  pending: number
+  installing: number
+  covered: number
+}
+export type ExpenseBuyerLine = { key: string; label: string; color: string; total: number }
+export type ExpenseCumulativeDay = { day: string; total: number; amounts: Record<string, number> }
 
 export type ExpenseStats = {
   from: string
@@ -175,11 +197,16 @@ export type ExpenseStats = {
   paidAmount: number
   pendingAmount: number
   installingAmount: number
+  coveredAmount: number
   paidCount: number
   pendingCount: number
   installingCount: number
+  coveredCount: number
   stillOwed: number
+  contributedAmount: number
   days: ExpenseDay[]
+  cumulativeDays: ExpenseCumulativeDay[]
+  buyerLines: ExpenseBuyerLine[]
   details: ExpenseSlice[]
   buyers: ExpenseSlice[]
 }
@@ -197,22 +224,35 @@ function walkDays(from: string, to: string) {
 }
 
 function emptySlice(key: string, label: string): ExpenseSlice {
-  return { key, label, paid: 0, pending: 0, installing: 0 }
+  return { key, label, paid: 0, pending: 0, installing: 0, covered: 0 }
+}
+
+function sliceTotal(slice: ExpenseSlice) {
+  return slice.paid + slice.pending + slice.installing + slice.covered
 }
 
 export function expenseStats(expenses: readonly Expense[], from: string, to: string, today: string): ExpenseStats {
   const horizon = expenseHorizon(from, to)
   const days = walkDays(horizon.from, horizon.to)
   const inWindow = new Set(days)
-  const perDay = new Map<string, ExpenseDay>(days.map((day) => [day, { day, paid: 0, pending: 0, installing: 0 }]))
+  const perDay = new Map<string, ExpenseDay>(
+    days.map((day) => [day, { day, paid: 0, pending: 0, installing: 0, covered: 0 }]),
+  )
+  const dailyByBuyer = new Map<string, Map<string, number>>()
   const buyers = new Map<string, ExpenseSlice>()
   const details = new Map<ExpenseDetail, ExpenseSlice>(
     EXPENSE_DETAILS.map((detail) => [detail, emptySlice(detail, EXPENSE_DETAIL_LABEL[detail])]),
   )
-  const seen = { paid: new Set<string>(), pending: new Set<string>(), installing: new Set<string>() }
+  const seen = {
+    paid: new Set<string>(),
+    pending: new Set<string>(),
+    installing: new Set<string>(),
+    covered: new Set<string>(),
+  }
   let paidAmount = 0
   let pendingAmount = 0
   let installingAmount = 0
+  let coveredAmount = 0
   let stillOwed = 0
 
   for (const expense of expenses) {
@@ -222,6 +262,9 @@ export function expenseStats(expenses: readonly Expense[], from: string, to: str
       const day = perDay.get(portion.date)
       const detail = details.get(expense.detail) ?? emptySlice(expense.detail, EXPENSE_DETAIL_LABEL[expense.detail])
       const buyer = buyers.get(expense.personId) ?? emptySlice(expense.personId, expense.buyerName)
+      const buyerDay = dailyByBuyer.get(expense.personId) ?? new Map<string, number>()
+      buyerDay.set(portion.date, (buyerDay.get(portion.date) ?? 0) + portion.amount)
+      dailyByBuyer.set(expense.personId, buyerDay)
       if (portion.bucket === 'paid') {
         paidAmount += portion.amount
         seen.paid.add(expense.id)
@@ -234,6 +277,12 @@ export function expenseStats(expenses: readonly Expense[], from: string, to: str
         if (day) day.pending += portion.amount
         detail.pending += portion.amount
         buyer.pending += portion.amount
+      } else if (portion.bucket === 'covered') {
+        coveredAmount += portion.amount
+        seen.covered.add(expense.id)
+        if (day) day.covered += portion.amount
+        detail.covered += portion.amount
+        buyer.covered += portion.amount
       } else {
         installingAmount += portion.amount
         seen.installing.add(expense.id)
@@ -246,22 +295,47 @@ export function expenseStats(expenses: readonly Expense[], from: string, to: str
     }
   }
 
+  const buyerList = [...buyers.values()].sort(
+    (left, right) => sliceTotal(right) - sliceTotal(left) || left.label.localeCompare(right.label, 'es'),
+  )
+  const buyerLines: ExpenseBuyerLine[] = buyerList.map((buyer, index) => ({
+    key: buyer.key,
+    label: buyer.label,
+    color: CAREGIVER_LINE_COLORS[index % CAREGIVER_LINE_COLORS.length] ?? '#0f766e',
+    total: sliceTotal(buyer),
+  }))
+  const running = new Map(buyerLines.map((buyer) => [buyer.key, 0]))
+  const cumulativeDays: ExpenseCumulativeDay[] = days.map((day) => {
+    const amounts: Record<string, number> = {}
+    let total = 0
+    for (const buyer of buyerLines) {
+      const next = (running.get(buyer.key) ?? 0) + (dailyByBuyer.get(buyer.key)?.get(day) ?? 0)
+      running.set(buyer.key, next)
+      amounts[buyer.key] = next
+      total += next
+    }
+    return { day, total, amounts }
+  })
+
   return {
     from: horizon.from,
     to: horizon.to,
     paidAmount,
     pendingAmount,
     installingAmount,
+    coveredAmount,
     paidCount: seen.paid.size,
     pendingCount: seen.pending.size,
     installingCount: seen.installing.size,
+    coveredCount: seen.covered.size,
     stillOwed,
+    contributedAmount: paidAmount + pendingAmount + installingAmount + coveredAmount,
     days: [...perDay.values()],
+    cumulativeDays,
+    buyerLines,
     details: EXPENSE_DETAILS.map((detail) => details.get(detail) ?? emptySlice(detail, EXPENSE_DETAIL_LABEL[detail])),
-    buyers: [...buyers.values()].sort(
-      (left, right) =>
-        right.paid + right.pending + right.installing - (left.paid + left.pending + left.installing) ||
-        left.label.localeCompare(right.label, 'es'),
-    ),
+    buyers: buyerList,
   }
 }
+
+const CAREGIVER_LINE_COLORS = ['#0f766e', '#1d4ed8', '#c2410c', '#7c3aed', '#be123c', '#0369a1', '#a16207', '#334155']

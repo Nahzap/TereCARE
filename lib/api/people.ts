@@ -12,8 +12,15 @@ export class PeopleMissingError extends Error {
   }
 }
 
-export function peopleSchemaMissing(error: { code?: string; message?: string } | null) {
+export function phoneColumnMissing(error: { code?: string; message?: string } | null) {
   if (!error) return false
+  const message = error.message ?? ''
+  if (!message.toLowerCase().includes('phone')) return false
+  return error.code === '42703' || error.code === 'PGRST204' || message.includes('schema cache')
+}
+
+export function peopleSchemaMissing(error: { code?: string; message?: string } | null) {
+  if (!error || phoneColumnMissing(error)) return false
   if (['PGRST202', 'PGRST205', '42P01', '42703', '42883'].includes(error.code ?? '')) return true
   const message = error.message ?? ''
   return message.includes('schema cache') && (message.includes('care_people') || message.includes('person_id'))
@@ -31,17 +38,25 @@ export async function loadMembers(supabase: AppClient, patientId: string): Promi
   })
 }
 
-export async function loadPeople(supabase: AppClient, patientId: string): Promise<CarePerson[]> {
-  const [peopleResult, members] = await Promise.all([
+async function selectPeople(supabase: AppClient, patientId: string) {
+  const listed = (columns: string) =>
     supabase
       .from('care_people')
-      .select('id, display_name, email, user_id')
+      .select(columns)
       .eq('patient_id', patientId)
       .order('created_at', { ascending: true })
-      .order('id', { ascending: true }),
-    loadMembers(supabase, patientId),
-  ])
+      .order('id', { ascending: true })
+
+  const withPhone = await listed('id, display_name, email, phone, user_id')
+  if (!phoneColumnMissing(withPhone.error)) return { ...withPhone, phoneReady: true }
+  const withoutPhone = await listed('id, display_name, email, user_id')
+  return { ...withoutPhone, phoneReady: false }
+}
+
+export async function loadPeople(supabase: AppClient, patientId: string): Promise<CarePerson[]> {
+  const [peopleResult, members] = await Promise.all([selectPeople(supabase, patientId), loadMembers(supabase, patientId)])
   if (peopleSchemaMissing(peopleResult.error)) throw new PeopleMissingError()
   if (peopleResult.error) throw peopleResult.error
-  return buildPeople(asRows<CarePersonRow>(peopleResult.data), members)
+  const rows = asRows<CarePersonRow>(peopleResult.data).map((row) => ({ ...row, phone: row.phone ?? null }))
+  return buildPeople(rows, members)
 }

@@ -5,11 +5,14 @@ import type { Appointment } from '@/lib/appointments/map'
 import { addDays, shortDate, todayISO } from '@/lib/schedule/dates'
 import { filterEvents, groupEventsByDay, type TimelineEvent, type TimelineKind } from '@/lib/timeline/events'
 import type { AppointmentCount, CoverageStats, DayDoses, PressurePoint } from '@/lib/timeline/stats'
+import type { ContributionStats } from '@/lib/contributions/equivalent'
 import type { ExpenseStats } from '@/lib/expenses/expense'
+import type { Role } from '@/lib/domain'
 import { utcToLocalDateTime } from '@/lib/time/zoned'
 import { api, errorText } from '@/components/api'
 import { AppointmentChart } from '@/components/dashboard/appointment-chart'
 import { ChartCard } from '@/components/dashboard/chart-parts'
+import { ContributionChart } from '@/components/dashboard/contribution-chart'
 import { CoverageDaysChart, CoveragePeopleChart } from '@/components/dashboard/coverage-charts'
 import { DoseChart } from '@/components/dashboard/dose-chart'
 import { ExpenseDaysChart, ExpenseSplitChart } from '@/components/dashboard/expense-charts'
@@ -20,11 +23,13 @@ type Payload = {
   from: string
   to: string
   today: string
+  role: Role
   doses: DayDoses[]
   pressure: PressurePoint[]
   appointments: AppointmentCount[]
   coverage: CoverageStats | null
   expenses: ExpenseStats | null
+  contributions: ContributionStats | null
   nextAppointment: Appointment | null
   events: TimelineEvent[]
 }
@@ -115,15 +120,30 @@ export function PatientDashboard({ patientId }: { patientId: string }) {
             )}
             <AppointmentChart counts={payload.appointments} />
             {payload.expenses ? (
-              <>
-                <ExpenseDaysChart stats={payload.expenses} today={payload.today} />
-                <ExpenseSplitChart stats={payload.expenses} patientId={patientId} />
-              </>
+              <ExpenseDaysChart stats={payload.expenses} today={payload.today} />
             ) : (
               <ChartCard title="Gastos" empty="Los gastos todavía no están listos.">
                 {null}
               </ChartCard>
             )}
+            {payload.contributions ? (
+              <div className="lg:col-span-2">
+                <ContributionChart
+                  patientId={patientId}
+                  stats={payload.contributions}
+                  today={payload.today}
+                  role={payload.role}
+                  onRateChange={(rateClp) =>
+                    setPayload((current) =>
+                      current?.contributions
+                        ? { ...current, contributions: { ...current.contributions, currentRateClp: rateClp } }
+                        : current,
+                    )
+                  }
+                />
+              </div>
+            ) : null}
+            {payload.expenses ? <ExpenseSplitChart stats={payload.expenses} patientId={patientId} /> : null}
           </div>
           <section data-jump="Registro" className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center justify-between gap-2">

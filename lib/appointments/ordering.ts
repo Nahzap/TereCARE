@@ -23,6 +23,10 @@ export type AppointmentGroups<T extends AppointmentMoment> = {
   past: T[]
 }
 
+export function sortAppointmentsByStart<T extends AppointmentMoment>(items: readonly T[]): T[] {
+  return [...items].sort(byStart)
+}
+
 export function groupAppointments<T extends AppointmentMoment>(items: readonly T[], today: string): AppointmentGroups<T> {
   const overdue: T[] = []
   const upcoming: T[] = []
@@ -36,7 +40,7 @@ export function groupAppointments<T extends AppointmentMoment>(items: readonly T
 
   overdue.sort(byStart)
   upcoming.sort(byStart)
-  past.sort((a, b) => b.startsAt.localeCompare(a.startsAt) || b.id.localeCompare(a.id))
+  past.sort(byStart)
 
   return {
     next: upcoming[0] ?? null,
@@ -47,7 +51,7 @@ export function groupAppointments<T extends AppointmentMoment>(items: readonly T
 }
 
 function byStart(a: AppointmentMoment, b: AppointmentMoment) {
-  return a.startsAt.localeCompare(b.startsAt) || a.id.localeCompare(b.id)
+  return a.startsAt.localeCompare(b.startsAt) || a.localDate.localeCompare(b.localDate) || a.id.localeCompare(b.id)
 }
 
 export function appointmentDayLabel(localDate: string, today: string) {

@@ -3,6 +3,7 @@ import { grantDecision } from '@/lib/access/grants'
 import { grantBodySchema } from '@/lib/access/schema'
 import { context, isOwner, isUniqueViolation, jsonError, parseBody, requireRole, respond } from '@/lib/api/guard'
 import { asRows, compareMembers, mapInvite, mapMember } from '@/lib/api/map'
+import { loadPeople, PeopleMissingError } from '@/lib/api/people'
 import type { Invite } from '@/lib/domain'
 
 type Context = { params: Promise<{ id: string }> }
@@ -34,9 +35,16 @@ export async function GET(_request: Request, { params }: Context) {
         .is('accepted_at', null)
         .order('created_at', { ascending: true })
       if (inviteResult.error) throw inviteResult.error
-      invites = asRows<{ id: string; email: string; role: string; created_at: string }>(
-        inviteResult.data,
-      ).map(mapInvite)
+      let people: Awaited<ReturnType<typeof loadPeople>> = []
+      try {
+        people = await loadPeople(session.supabase, id)
+      } catch (error) {
+        if (!(error instanceof PeopleMissingError)) throw error
+      }
+      const byEmail = new Map(people.flatMap((person) => (person.email ? [[person.email, person] as const] : [])))
+      invites = asRows<{ id: string; email: string; role: string; created_at: string }>(inviteResult.data).map((row) =>
+        mapInvite(row, byEmail.get(row.email.trim().toLowerCase())),
+      )
     }
 
     return NextResponse.json({ members, invites })

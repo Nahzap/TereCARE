@@ -32,6 +32,7 @@ async function PatientLoader({ params, searchParams }: SchedulePageProps) {
       {section === 'posologia' ? <ScheduleBoard patientId={patientId} initialMonday={initialMonday} /> : null}
       {section === 'presion' ? <PressureBoard patientId={patientId} /> : null}
       {section === 'citas' ? <AppointmentsBoard patientId={patientId} /> : null}
+      {section === 'gastos' ? <ExpensesBoard patientId={patientId} /> : null}
       {section === 'dashboard' ? <PatientDashboard patientId={patientId} /> : null}
     </PatientSectionNav>
   )

@@ -18,6 +18,7 @@ import {
   applyChanges,
   caregiverColor,
   clampWindowStart,
+  COVERAGE_FUTURE_DAYS,
   COVERAGE_RADIUS_DAYS,
   COVERAGE_WEEK_DAYS,
   coverageDiff,
@@ -538,10 +539,10 @@ export function CoverageBoard({
             </h2>
             {data ? (
               <p className="mt-1 max-w-3xl text-sm text-slate-600">
-                Cada casilla es una hora, hora de Chile. Elige a una persona y arrastra un rectángulo de días y
-                horas. Una hora puede tener a varias personas: cada una se ve como una franja del mismo ancho. Con
-                «Borrar» dejas horas sin nadie. Pulsa Guardar para confirmar. Solo se puede planificar hasta
-                15 días después de hoy.
+                Cada casilla es una hora, hora de Chile. La grilla muestra el tramo reciente y toda la proyección
+                de planificación, hasta {COVERAGE_FUTURE_DAYS} días después de hoy. Elige a una persona y arrastra
+                un rectángulo de días y horas. Una hora puede tener a varias personas: cada una se ve como una
+                franja del mismo ancho. Con «Borrar» dejas horas sin nadie. Pulsa Guardar para confirmar.
               </p>
             ) : (
               <p className="mt-1 max-w-3xl text-sm text-slate-600">

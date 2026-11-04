@@ -3,10 +3,12 @@ import type { CarePerson } from '@/lib/coverage/people'
 import { addDays, DAY_SHORT, MONTHS } from '@/lib/schedule/dates'
 
 export const COVERAGE_RADIUS_DAYS = 15
+export const COVERAGE_FUTURE_DAYS = 90
 export const COVERAGE_WEEK_DAYS = 7
 const HISTORY_YEARS_BACK = 4
 export const HOURS_IN_DAY = 24
-const COVERAGE_DAY_COUNT = COVERAGE_RADIUS_DAYS * 2 + 1
+/** Lookback for context, today, and the whole planning horizon in one grid. */
+const COVERAGE_DAY_COUNT = COVERAGE_RADIUS_DAYS + 1 + COVERAGE_FUTURE_DAYS
 export const COVERAGE_SLOT_LIMIT = COVERAGE_DAY_COUNT * HOURS_IN_DAY
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
@@ -55,7 +57,7 @@ export function historyBounds(today: string) {
   const year = Number(today.slice(0, 4))
   return {
     earliest: `${year - HISTORY_YEARS_BACK}-01-01`,
-    latest: addDays(today, COVERAGE_RADIUS_DAYS),
+    latest: addDays(today, COVERAGE_FUTURE_DAYS),
   }
 }
 

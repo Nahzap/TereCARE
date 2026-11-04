@@ -69,11 +69,6 @@ export const doseBodySchema = z.object({
   taken: z.boolean('Indica si la dosis fue tomada'),
 })
 
-export const inviteBodySchema = z.object({
-  email: z.email('Ingresa un correo válido'),
-  role: z.enum(['caregiver', 'viewer'], 'Elige cuidador o solo lectura'),
-})
-
 export function firstZodError(error: ZodError): string {
   return error.issues[0]?.message ?? 'Revisa los datos ingresados'
 }

@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server'
-import { context, isOwner, isUniqueViolation, jsonError, parseBody, requireRole, respond } from '@/lib/api/guard'
-import { inviteCaregiver, peopleWithHours } from '@/lib/api/people-admin'
-import { loadMembers, PEOPLE_MISSING, PeopleMissingError, peopleSchemaMissing } from '@/lib/api/people'
-import { cleanEmail, personCreateSchema } from '@/lib/coverage/people'
+import { context, isOwner, jsonError, parseBody, requireRole, respond } from '@/lib/api/guard'
+import { inviteCaregiver, peopleWithHours, savePerson } from '@/lib/api/people-admin'
+import { loadMembers, PEOPLE_MISSING, PeopleMissingError } from '@/lib/api/people'
+import { cleanEmail, cleanPhone, personCreateSchema } from '@/lib/coverage/people'
 
 type Context = { params: Promise<{ id: string }> }
 
@@ -35,6 +35,7 @@ export async function POST(request: Request, { params }: Context) {
     const body = await parseBody(request, personCreateSchema)
     if ('response' in body) return body.response
     const email = cleanEmail(body.data.email)
+    const phone = cleanPhone(body.data.phone)
 
     if (email) {
       const members = await loadMembers(session.supabase, id)
@@ -43,17 +44,18 @@ export async function POST(request: Request, { params }: Context) {
       }
     }
 
-    const inserted = await session.supabase
-      .from('care_people')
-      .insert({ patient_id: id, display_name: body.data.name, email, created_by: session.user.id })
-      .select('id')
-      .maybeSingle()
-    if (peopleSchemaMissing(inserted.error)) return jsonError(PEOPLE_MISSING, 503)
-    if (isUniqueViolation(inserted.error)) return jsonError('Ya hay una persona con ese correo', 409)
-    if (inserted.error) throw inserted.error
-    if (!inserted.data) throw new Error('No se pudo agregar a la persona')
+    const saved = await savePerson(session.supabase, {
+      mode: 'insert',
+      patientId: id,
+      actorId: session.user.id,
+      name: body.data.name,
+      email,
+      phone,
+    })
+    if ('error' in saved) return jsonError(saved.error, saved.status)
+    if (!saved.createdId) throw new Error('No se pudo agregar a la persona')
 
     if (email) await inviteCaregiver(session.supabase, id, email, session.user.id)
-    return NextResponse.json({ id: inserted.data.id, invited: email != null }, { status: 201 })
+    return NextResponse.json({ id: saved.createdId, invited: email != null, phoneSaved: saved.phoneSaved }, { status: 201 })
   })
 }

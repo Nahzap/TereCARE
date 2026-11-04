@@ -35,14 +35,14 @@ import {
 describe('coverage window', () => {
   const today = '2026-10-29'
 
-  it('opens on 15 days before and 15 days after today', () => {
+  it('opens on the recent days and the full planning horizon', () => {
     const window = coverageView(today)
     expect(window.from).toBe('2026-10-14')
-    expect(window.to).toBe('2026-11-13')
-    expect(window.days).toHaveLength(31)
+    expect(window.to).toBe('2027-01-27')
+    expect(window.days).toHaveLength(106)
     expect(window.days[0]).toBe('2026-10-14')
     expect(window.days[15]).toBe(today)
-    expect(window.days[30]).toBe('2026-11-13')
+    expect(window.days[105]).toBe('2027-01-27')
   })
 
   it('labels Thursday 29 October', () => {
@@ -50,41 +50,48 @@ describe('coverage window', () => {
     expect(weekdayTitle(today)).toBe('Jueves')
   })
 
-  it('slides a month of history and stops 15 days after today', () => {
+  it('slides through history and stops at the planning horizon', () => {
     const january = coverageView(today, '2026-01-01')
     expect(january.from).toBe('2026-01-01')
-    expect(january.to).toBe('2026-01-31')
-    expect(january.days).toHaveLength(31)
+    expect(january.to).toBe('2026-04-16')
+    expect(january.days).toHaveLength(106)
 
     const november = coverageView(today, '2026-11-01')
     expect(november.from).toBe('2026-11-01')
-    expect(november.to).toBe('2026-11-13')
-    expect(november.days).toHaveLength(13)
+    expect(november.to).toBe('2027-01-27')
+    expect(november.days).toHaveLength(88)
+
+    const januaryNext = coverageView(today, '2027-01-01')
+    expect(januaryNext.from).toBe('2027-01-01')
+    expect(januaryNext.to).toBe('2027-01-27')
+    expect(januaryNext.days).toHaveLength(27)
   })
 
   it('does not open before the history floor', () => {
     const early = coverageView(today, '2019-06-01')
     expect(early.from).toBe('2022-01-01')
-    expect(early.days).toHaveLength(31)
+    expect(early.days).toHaveLength(106)
   })
 
   it('blocks dates outside the history and the planning horizon', () => {
     expect(coverageDateBlock('2026-01-01', today)).toBeNull()
-    expect(coverageDateBlock('2026-11-13', today)).toBeNull()
-    expect(coverageDateBlock('2026-11-14', today)).toBe('future')
+    expect(coverageDateBlock('2027-01-27', today)).toBeNull()
+    expect(coverageDateBlock('2027-01-28', today)).toBe('future')
     expect(coverageDateBlock('2021-12-31', today)).toBe('past')
   })
 
   it('knows which months still belong to the history', () => {
     expect(monthOverlapsHistory(2026, 1, today)).toBe(true)
-    expect(monthOverlapsHistory(2026, 11, today)).toBe(true)
-    expect(monthOverlapsHistory(2026, 12, today)).toBe(false)
+    expect(monthOverlapsHistory(2026, 12, today)).toBe(true)
+    expect(monthOverlapsHistory(2027, 1, today)).toBe(true)
+    expect(monthOverlapsHistory(2027, 2, today)).toBe(false)
     expect(monthOverlapsHistory(2021, 12, today)).toBe(false)
   })
 })
 
 describe('day slider', () => {
   const today = '2026-10-29'
+  const latest = '2027-01-27'
 
   it('counts one step per day and maps the thumb back to that day', () => {
     expect(daysBetween('2026-10-14', '2026-10-14')).toBe(0)
@@ -95,7 +102,7 @@ describe('day slider', () => {
     const index = daysBetween('2022-01-01', home)
     expect(shiftCoverageStart('2022-01-01', today, index)).toBe(home)
     expect(shiftCoverageStart('2022-01-01', today, 0)).toBe('2022-01-01')
-    expect(shiftCoverageStart('2022-01-01', today, daysBetween('2022-01-01', '2026-11-13'))).toBe('2026-11-13')
+    expect(shiftCoverageStart('2022-01-01', today, daysBetween('2022-01-01', latest))).toBe(latest)
     expect(shiftCoverageStart('2022-01-01', today, -20)).toBe('2022-01-01')
   })
 
@@ -103,8 +110,9 @@ describe('day slider', () => {
     expect(COVERAGE_WEEK_DAYS).toBe(7)
     expect(shiftCoverageStart('2026-10-14', today, -COVERAGE_WEEK_DAYS)).toBe('2026-10-07')
     expect(shiftCoverageStart('2026-10-14', today, COVERAGE_WEEK_DAYS)).toBe('2026-10-21')
-    expect(shiftCoverageStart('2026-11-10', today, COVERAGE_WEEK_DAYS)).toBe('2026-11-13')
-    expect(shiftCoverageStart('2026-11-13', today, COVERAGE_WEEK_DAYS)).toBe('2026-11-13')
+    expect(shiftCoverageStart('2026-11-10', today, COVERAGE_WEEK_DAYS)).toBe('2026-11-17')
+    expect(shiftCoverageStart('2027-01-20', today, COVERAGE_WEEK_DAYS)).toBe(latest)
+    expect(shiftCoverageStart(latest, today, COVERAGE_WEEK_DAYS)).toBe(latest)
     expect(shiftCoverageStart('2022-01-03', today, -COVERAGE_WEEK_DAYS)).toBe('2022-01-01')
     expect(shiftCoverageStart('2022-01-01', today, -COVERAGE_WEEK_DAYS)).toBe('2022-01-01')
   })
@@ -266,17 +274,17 @@ describe('hours per caregiver', () => {
   it('sums over the days in view, the month and year around them, or the whole history', () => {
     expect(isTotalScope('month')).toBe(true)
     expect(isTotalScope('week')).toBe(false)
-    expect(totalsRange('window', home)).toEqual({ from: '2026-10-17', to: '2026-11-16' })
-    expect(totalsRange('month', home)).toEqual({ from: '2026-11-01', to: '2026-11-16' })
-    expect(totalsRange('year', home)).toEqual({ from: '2026-01-01', to: '2026-11-16' })
-    expect(totalsRange('all', home)).toEqual({ from: '2022-01-01', to: '2026-11-16' })
-    expect(totalsRange('month', coverageView(today, '2026-03-01'))).toEqual({ from: '2026-03-01', to: '2026-03-31' })
+    expect(totalsRange('window', home)).toEqual({ from: '2026-10-17', to: '2027-01-30' })
+    expect(totalsRange('month', home)).toEqual({ from: '2026-12-01', to: '2026-12-31' })
+    expect(totalsRange('year', home)).toEqual({ from: '2026-01-01', to: '2026-12-31' })
+    expect(totalsRange('all', home)).toEqual({ from: '2022-01-01', to: '2027-01-30' })
+    expect(totalsRange('month', coverageView(today, '2026-03-01'))).toEqual({ from: '2026-04-01', to: '2026-04-30' })
     expect(totalsRange('year', coverageView(today, '2022-01-01'))).toEqual({ from: '2022-01-01', to: '2022-12-31' })
   })
 
   it('names each period', () => {
-    expect(totalsLabel('window', { from: '2026-10-17', to: '2026-11-16' })).toBe('Días a la vista')
-    expect(totalsLabel('month', { from: '2026-11-01', to: '2026-11-16' })).toBe('Nov 2026')
+    expect(totalsLabel('window', { from: '2026-10-17', to: '2027-01-30' })).toBe('Días a la vista')
+    expect(totalsLabel('month', { from: '2026-12-01', to: '2026-12-31' })).toBe('Dic 2026')
     expect(totalsLabel('year', { from: '2026-01-01', to: '2026-11-16' })).toBe('2026')
     expect(totalsLabel('all', { from: '2022-01-01', to: '2026-11-16' })).toBe('Todo el historial')
   })

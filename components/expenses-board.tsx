@@ -5,6 +5,7 @@ import type { Role } from '@/lib/domain'
 import {
   EXPENSE_DETAIL_LABEL,
   EXPENSE_DETAILS,
+  EXPENSE_NOTE_MAX,
   EXPENSE_PAYMENT_LABEL,
   EXPENSE_PAYMENTS,
   expenseGroups,
@@ -26,6 +27,7 @@ const EMPTY = {
   spentOn: '',
   payment: 'pagado' as ExpensePayment,
   detail: 'medicamentos' as ExpenseDetail,
+  note: '',
   personId: '',
   amount: '',
   installments: '',
@@ -88,6 +90,7 @@ export function ExpensesBoard({ patientId }: { patientId: string }) {
           spentOn: form.spentOn,
           payment: form.payment,
           detail: form.detail,
+          note: form.note,
           amount,
           installments: form.payment === 'pagandose' ? Number(form.installments) : null,
           endsOn: form.payment === 'pagandose' ? form.endsOn : null,
@@ -107,6 +110,7 @@ export function ExpensesBoard({ patientId }: { patientId: string }) {
       spentOn: expense.spentOn,
       payment: expense.payment,
       detail: expense.detail,
+      note: expense.note,
       personId: expense.personId,
       amount: String(expense.amount),
       installments: expense.installments ? String(expense.installments) : '',
@@ -116,7 +120,8 @@ export function ExpensesBoard({ patientId }: { patientId: string }) {
   }
 
   async function remove(expense: Expense) {
-    if (!window.confirm(`¿Quitar ${EXPENSE_DETAIL_LABEL[expense.detail]} de ${formatPesos(expense.amount)}?`)) return
+    const label = expense.note || EXPENSE_DETAIL_LABEL[expense.detail]
+    if (!window.confirm(`¿Quitar ${label} de ${formatPesos(expense.amount)}?`)) return
     setSaving(true)
     setFormError(null)
     try {
@@ -141,8 +146,8 @@ export function ExpensesBoard({ patientId }: { patientId: string }) {
       <header>
         <h1 className="text-2xl font-black">Gastos</h1>
         <p className="text-sm text-slate-600">
-          Cada gasto lleva fecha, detalle, monto en pesos y quién lo pagó. La fecha puede ser futura. Si todavía no se
-          paga, queda pendiente. Si se va pagando en cuotas, queda pagándose hasta la última fecha.
+          Cada gasto lleva fecha, tipo, detalle, monto en pesos y quién lo pagó. La fecha puede ser futura. Si todavía
+          no se paga, queda pendiente. Si se va pagando en cuotas, queda pagándose hasta la última fecha.
         </p>
       </header>
       {error ? <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p> : null}
@@ -181,7 +186,7 @@ export function ExpensesBoard({ patientId }: { patientId: string }) {
             </select>
           </label>
           <label className="text-sm font-bold text-slate-700">
-            Detalle
+            Tipo
             <select
               value={form.detail}
               onChange={(event) => setForm({ ...form, detail: event.target.value as ExpenseDetail })}
@@ -193,6 +198,16 @@ export function ExpensesBoard({ patientId }: { patientId: string }) {
                 </option>
               ))}
             </select>
+          </label>
+          <label className="text-sm font-bold text-slate-700 sm:col-span-2 lg:col-span-3">
+            Detalle
+            <input
+              maxLength={EXPENSE_NOTE_MAX}
+              value={form.note}
+              onChange={(event) => setForm({ ...form, note: event.target.value })}
+              placeholder="Qué se compró o pagó"
+              className={fieldClass}
+            />
           </label>
           {form.payment === 'pagandose' ? (
             <>
@@ -280,6 +295,7 @@ export function ExpensesBoard({ patientId }: { patientId: string }) {
             <thead>
               <tr className="text-[11px] font-bold tracking-wide text-slate-500 uppercase">
                 <th className="px-3 py-2">Fecha</th>
+                <th className="px-3 py-2">Tipo</th>
                 <th className="px-3 py-2">Detalle</th>
                 <th className="px-3 py-2">Comprador</th>
                 <th className="px-3 py-2 text-right">Monto</th>
@@ -300,6 +316,7 @@ export function ExpensesBoard({ patientId }: { patientId: string }) {
                       </span>
                     ) : null}
                   </td>
+                  <td className="px-3 py-2 text-slate-700">{expense.note || '—'}</td>
                   <td className="px-3 py-2 text-slate-700">{expense.buyerName}</td>
                   <td
                     className={`px-3 py-2 text-right font-black tabular-nums ${

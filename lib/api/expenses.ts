@@ -5,7 +5,8 @@ import { type Expense, type ExpenseDetail, type ExpensePayment, EXPENSE_DETAILS 
 export const EXPENSES_MISSING =
   'Los gastos todavía no están listos. Falta aplicar la migración en la base de datos.'
 
-const COLUMNS = 'id, patient_id, person_id, spent_on, payment, detail, amount, installments, ends_on, care_people(display_name)'
+const COLUMNS =
+  'id, patient_id, person_id, spent_on, payment, detail, note, amount, installments, ends_on, care_people(display_name)'
 
 type ExpenseRow = {
   id: string
@@ -14,6 +15,7 @@ type ExpenseRow = {
   spent_on: string
   payment: string
   detail: string
+  note: string | null
   amount: number
   installments: number | null
   ends_on: string | null
@@ -48,6 +50,7 @@ export function mapExpense(row: ExpenseRow): Expense {
     spentOn: normalizeDate(row.spent_on) ?? row.spent_on,
     payment: asPayment(row.payment),
     detail: asDetail(row.detail),
+    note: row.note?.trim() ?? '',
     amount: row.amount,
     personId: row.person_id,
     buyerName: buyerName(row.care_people),

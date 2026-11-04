@@ -11,12 +11,18 @@ type PeoplePayload = { role: Role; people: CarePersonDetail[] }
 
 type Dialog = { kind: 'edit'; person: CarePersonDetail } | { kind: 'merge'; person: CarePersonDetail } | null
 
+function noted(message: string, phoneSaved: boolean | undefined) {
+  return phoneSaved === false ? `${message}. El teléfono todavía no está en la base de datos` : message
+}
+
 export function CarePeoplePanel({
   patientId,
+  revision = 0,
   onChange,
   onToast,
 }: {
   patientId: string
+  revision?: number
   onChange: () => void
   onToast: (message: string) => void
 }) {
@@ -26,8 +32,9 @@ export function CarePeoplePanel({
   const [saving, setSaving] = useState(false)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
+  const [phone, setPhone] = useState('')
   const [dialog, setDialog] = useState<Dialog>(null)
-  const [revision, setRevision] = useState(0)
+  const [localRevision, setLocalRevision] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -43,14 +50,14 @@ export function CarePeoplePanel({
     return () => {
       cancelled = true
     }
-  }, [patientId, revision])
+  }, [patientId, revision, localRevision])
 
   const isOwner = payload?.role === 'owner'
   const people = payload?.people ?? []
 
   function changed(message: string) {
     setDialog(null)
-    setRevision((value) => value + 1)
+    setLocalRevision((value) => value + 1)
     onChange()
     onToast(message)
   }
@@ -72,15 +79,17 @@ export function CarePeoplePanel({
   async function add(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const done = await run(async () => {
-      const result = await api<{ invited: boolean }>(`/api/patients/${patientId}/people`, {
+      const result = await api<{ invited: boolean; phoneSaved?: boolean }>(`/api/patients/${patientId}/people`, {
         method: 'POST',
-        body: JSON.stringify({ name: name.trim(), email: email.trim() }),
+        body: JSON.stringify({ name: name.trim(), email: email.trim(), phone: phone.trim() }),
       })
-      return result.invited ? 'Persona agregada e invitada' : 'Persona agregada'
+      const added = result.invited ? 'Persona agregada e invitada' : 'Persona agregada'
+      return noted(added, result.phoneSaved)
     })
     if (done) {
       setName('')
       setEmail('')
+      setPhone('')
     }
   }
 
@@ -99,9 +108,9 @@ export function CarePeoplePanel({
         Personas que cuidan
       </h2>
       <p className="mt-1 max-w-3xl text-sm text-slate-600">
-        Agrega a quienes cuidan aunque todavía no tengan cuenta, y asígnales horas en el horario. Si anotas su Gmail,
-        queda invitada: cuando entre con ese correo, su cuenta se une a esta misma persona con todas sus horas. Si
-        entra con otro correo, usa Fusionar para unir a las dos sin duplicar horas.
+        Agrega a quienes cuidan aunque todavía no tengan cuenta, con nombre, correo y teléfono. Si anotas el correo,
+        queda invitada: cuando entre con ese correo, su cuenta se une a esta misma persona, con su nombre y sus horas.
+        Si entra con otro correo, usa Fusionar para unir a las dos sin duplicar horas.
       </p>
 
       {error ? (
@@ -136,7 +145,7 @@ export function CarePeoplePanel({
                 <div className="min-w-0">
                   <p className="font-bold">{person.name}</p>
                   <p className="text-sm text-slate-500">
-                    {[personStatus(person), person.email, formatHours(person.hours)].filter(Boolean).join(' · ')}
+                    {[personStatus(person), person.email, person.phone, formatHours(person.hours)].filter(Boolean).join(' · ')}
                   </p>
                 </div>
               </div>
@@ -183,7 +192,7 @@ export function CarePeoplePanel({
       ) : null}
 
       {isOwner ? (
-        <form onSubmit={add} className="mt-4 grid gap-x-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+        <form onSubmit={add} className="mt-4 grid gap-x-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_auto] lg:items-end">
           <div>
             <FieldLabel htmlFor="person-name">Nombre</FieldLabel>
             <input
@@ -197,7 +206,7 @@ export function CarePeoplePanel({
             />
           </div>
           <div>
-            <FieldLabel htmlFor="person-email">Gmail (opcional)</FieldLabel>
+            <FieldLabel htmlFor="person-email">Correo (opcional)</FieldLabel>
             <input
               id="person-email"
               type="email"
@@ -206,6 +215,19 @@ export function CarePeoplePanel({
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               placeholder="Si lo sabes"
+              className={fieldClass}
+            />
+          </div>
+          <div>
+            <FieldLabel htmlFor="person-phone">Teléfono (opcional)</FieldLabel>
+            <input
+              id="person-phone"
+              type="tel"
+              maxLength={24}
+              autoComplete="off"
+              value={phone}
+              onChange={(event) => setPhone(event.target.value)}
+              placeholder="+56 9 1234 5678"
               className={fieldClass}
             />
           </div>
@@ -230,11 +252,11 @@ export function CarePeoplePanel({
           }}
           onSave={(changes) =>
             run(async () => {
-              await api(`/api/patients/${patientId}/people/${dialog.person.id}`, {
+              const result = await api<{ phoneSaved?: boolean }>(`/api/patients/${patientId}/people/${dialog.person.id}`, {
                 method: 'PATCH',
                 body: JSON.stringify(changes),
               })
-              return 'Persona actualizada'
+              return noted('Persona actualizada', result.phoneSaved)
             })
           }
         />
@@ -277,17 +299,22 @@ function EditPerson({
   saving: boolean
   error: string | null
   onClose: () => void
-  onSave: (changes: { name: string; email?: string }) => void
+  onSave: (changes: { name: string; email?: string; phone?: string }) => void
 }) {
   const [name, setName] = useState(person.name)
   const [email, setEmail] = useState(person.email ?? '')
+  const [phone, setPhone] = useState(person.phone ?? '')
 
   return (
     <Modal title={`Editar a ${person.name}`} onClose={onClose}>
       <form
         onSubmit={(event) => {
           event.preventDefault()
-          onSave(person.userId ? { name: name.trim() } : { name: name.trim(), email: email.trim() })
+          onSave(
+            person.userId
+              ? { name: name.trim(), phone: phone.trim() }
+              : { name: name.trim(), email: email.trim(), phone: phone.trim() },
+          )
         }}
       >
         <FieldLabel htmlFor="edit-person-name">Nombre en el horario</FieldLabel>
@@ -303,7 +330,7 @@ function EditPerson({
           <p className="mt-3 text-sm text-slate-600">Ya entró con {person.email || 'su cuenta'}; su correo no se cambia aquí.</p>
         ) : (
           <>
-            <FieldLabel htmlFor="edit-person-email">Gmail (opcional)</FieldLabel>
+            <FieldLabel htmlFor="edit-person-email">Correo (opcional)</FieldLabel>
             <input
               id="edit-person-email"
               type="email"
@@ -317,6 +344,16 @@ function EditPerson({
             </p>
           </>
         )}
+        <FieldLabel htmlFor="edit-person-phone">Teléfono (opcional)</FieldLabel>
+        <input
+          id="edit-person-phone"
+          type="tel"
+          maxLength={24}
+          value={phone}
+          onChange={(event) => setPhone(event.target.value)}
+          placeholder="+56 9 1234 5678"
+          className={fieldClass}
+        />
         {error ? (
           <p role="alert" className="mt-3 text-sm font-medium text-red-700">
             {error}

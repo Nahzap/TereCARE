@@ -69,7 +69,7 @@ function lineText(line: Line) {
           : event.payment === 'cubierto'
             ? 'Cubierto'
             : null
-    return [state, event.title, event.buyerName].filter(Boolean).join(' · ')
+    return [state, event.title, event.detail || event.buyerName].filter(Boolean).join(' · ')
   }
   return appointmentText(event)
 }

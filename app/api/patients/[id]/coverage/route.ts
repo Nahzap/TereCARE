@@ -5,6 +5,7 @@ import { loadPeople, PEOPLE_MISSING, PeopleMissingError, peopleSchemaMissing } f
 import type { CarePerson } from '@/lib/coverage/people'
 import { coverageWriteSchema } from '@/lib/coverage/schema'
 import {
+  COVERAGE_FUTURE_DAYS,
   coverageDateBlock,
   coverageView,
   dedupeSlots,
@@ -122,7 +123,7 @@ export async function PUT(request: Request, { params }: Context) {
     const blocked = slots
       .map((slot) => coverageDateBlock(slot.coveredOn, today))
       .find((block) => block != null)
-    if (blocked === 'future') return jsonError('Solo puedes marcar hasta 15 días después de hoy', 400)
+    if (blocked === 'future') return jsonError(`Solo puedes marcar hasta ${COVERAGE_FUTURE_DAYS} días después de hoy`, 400)
     if (blocked === 'past') return jsonError('Esa fecha queda fuera del historial', 400)
 
     try {
@@ -143,7 +144,7 @@ export async function PUT(request: Request, { params }: Context) {
         if (message.includes('No puedes editar')) return jsonError('No puedes editar el horario', 403)
         if (message.includes('Solo puedes asignar')) return jsonError('Solo puedes asignar a un cuidador', 400)
         if (message.includes('ventana')) {
-          return jsonError('Solo puedes marcar hasta 15 días después de hoy', 400)
+          return jsonError(`Solo puedes marcar hasta ${COVERAGE_FUTURE_DAYS} días después de hoy`, 400)
         }
         if (message.includes('hora')) return jsonError('La hora no es válida', 400)
         throw saved.error

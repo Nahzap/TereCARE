@@ -8,7 +8,7 @@ import { CarePeoplePanel } from '@/components/care-people-panel'
 import { CareSituationPanel } from '@/components/care-situation-panel'
 import { CoverageBoard } from '@/components/coverage-board'
 import { ROLE_LABEL } from '@/components/format'
-import { FieldLabel, fieldClass } from '@/components/modal'
+import { FieldLabel, fieldClass, Modal } from '@/components/modal'
 import { Toast, useToast } from '@/components/use-toast'
 
 type AccessPayload = { members: Member[]; invites: Invite[] }
@@ -21,7 +21,10 @@ export function CaregiversBoard({ patientId }: { patientId: string }) {
   const [invites, setInvites] = useState<Invite[]>([])
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
+  const [inviteName, setInviteName] = useState('')
+  const [invitePhone, setInvitePhone] = useState('')
   const [role, setRole] = useState<'caregiver' | 'viewer'>('caregiver')
+  const [editingInvite, setEditingInvite] = useState<Invite | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
@@ -64,12 +67,19 @@ export function CaregiversBoard({ patientId }: { patientId: string }) {
     setSaving(true)
     setFormError(null)
     try {
-      await api(`/api/patients/${patientId}/invites`, {
+      const result = await api<{ phoneSaved?: boolean }>(`/api/patients/${patientId}/invites`, {
         method: 'POST',
-        body: JSON.stringify({ email: email.trim(), role }),
+        body: JSON.stringify({
+          email: email.trim(),
+          role,
+          ...(role === 'caregiver' ? { name: inviteName.trim(), phone: invitePhone.trim() } : {}),
+        }),
       })
       setEmail('')
-      showToast('Invitación enviada')
+      setInviteName('')
+      setInvitePhone('')
+      showToast(result.phoneSaved === false ? 'Invitación enviada. El teléfono todavía no está en la base de datos' : 'Invitación enviada')
+      setPeopleRevision((value) => value + 1)
       setLoading(true)
       setReloadToken((value) => value + 1)
     } catch (reason) {
@@ -186,6 +196,7 @@ export function CaregiversBoard({ patientId }: { patientId: string }) {
           />
           <CarePeoplePanel
             patientId={patientId}
+            revision={peopleRevision}
             onToast={showToast}
             onChange={() => {
               setPeopleRevision((value) => value + 1)
@@ -237,6 +248,23 @@ export function CaregiversBoard({ patientId }: { patientId: string }) {
           {isOwner ? (
             <form data-jump="Invitar" onSubmit={invite} className="mt-6 rounded-2xl border border-slate-200 bg-white p-4">
               <h2 className="font-black">Invitar</h2>
+              <p className="mt-1 text-sm text-slate-600">
+                Un cuidador lleva nombre, correo y teléfono. El nombre queda listo antes de que se registre con ese correo.
+              </p>
+              {role === 'caregiver' ? (
+                <>
+                  <FieldLabel htmlFor="invite-name">Nombre</FieldLabel>
+                  <input
+                    id="invite-name"
+                    required
+                    maxLength={120}
+                    value={inviteName}
+                    onChange={(event) => setInviteName(event.target.value)}
+                    placeholder="Por ejemplo, Pilar"
+                    className={fieldClass}
+                  />
+                </>
+              ) : null}
               <FieldLabel htmlFor="invite-email">Correo</FieldLabel>
               <input
                 id="invite-email"
@@ -247,6 +275,20 @@ export function CaregiversBoard({ patientId }: { patientId: string }) {
                 onChange={(event) => setEmail(event.target.value)}
                 className={fieldClass}
               />
+              {role === 'caregiver' ? (
+                <>
+                  <FieldLabel htmlFor="invite-phone">Teléfono (opcional)</FieldLabel>
+                  <input
+                    id="invite-phone"
+                    type="tel"
+                    maxLength={24}
+                    value={invitePhone}
+                    onChange={(event) => setInvitePhone(event.target.value)}
+                    placeholder="+56 9 1234 5678"
+                    className={fieldClass}
+                  />
+                </>
+              ) : null}
               <FieldLabel htmlFor="invite-role">Rol</FieldLabel>
               <select
                 id="invite-role"
@@ -259,7 +301,7 @@ export function CaregiversBoard({ patientId }: { patientId: string }) {
               </select>
               <button
                 type="submit"
-                disabled={saving}
+                disabled={saving || (role === 'caregiver' && inviteName.trim() === '')}
                 className="mt-4 rounded-full bg-blue-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-60"
               >
                 {saving ? 'Enviando…' : 'Invitar'}
@@ -280,16 +322,29 @@ export function CaregiversBoard({ patientId }: { patientId: string }) {
                       className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
                     >
                       <div>
-                        <p className="font-bold">{inviteItem.email}</p>
-                        <p className="text-sm text-slate-500">{ROLE_LABEL[inviteItem.role]}</p>
+                        <p className="font-bold">{inviteItem.name || inviteItem.email}</p>
+                        <p className="text-sm text-slate-500">
+                          {[inviteItem.name ? inviteItem.email : null, inviteItem.phone, ROLE_LABEL[inviteItem.role]]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => removeInvite(inviteItem)}
-                        className="rounded-full px-3 py-1.5 text-sm font-bold text-red-700 hover:bg-red-50"
-                      >
-                        Quitar
-                      </button>
+                      <div className="flex gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setEditingInvite(inviteItem)}
+                          className="rounded-full px-3 py-1.5 text-sm font-bold text-blue-700 hover:bg-blue-50"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeInvite(inviteItem)}
+                          className="rounded-full px-3 py-1.5 text-sm font-bold text-red-700 hover:bg-red-50"
+                        >
+                          Quitar
+                        </button>
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -332,7 +387,126 @@ export function CaregiversBoard({ patientId }: { patientId: string }) {
         </>
       ) : null}
 
+      {editingInvite ? (
+        <EditInvite
+          inviteItem={editingInvite}
+          saving={saving}
+          error={formError}
+          onClose={() => {
+            setEditingInvite(null)
+            setFormError(null)
+          }}
+          onSave={async (changes) => {
+            setSaving(true)
+            setFormError(null)
+            try {
+              const result = await api<{ phoneSaved?: boolean }>(`/api/patients/${patientId}/invites/${editingInvite.id}`, {
+                method: 'PATCH',
+                body: JSON.stringify(changes),
+              })
+              setEditingInvite(null)
+              showToast(
+                result.phoneSaved === false
+                  ? 'Invitación actualizada. El teléfono todavía no está en la base de datos'
+                  : 'Invitación actualizada',
+              )
+              setPeopleRevision((value) => value + 1)
+              setLoading(true)
+              setReloadToken((value) => value + 1)
+            } catch (reason) {
+              const message = errorText(reason)
+              if (message) setFormError(message)
+            } finally {
+              setSaving(false)
+            }
+          }}
+        />
+      ) : null}
+
       <Toast message={toast} />
     </div>
+  )
+}
+
+function EditInvite({
+  inviteItem,
+  saving,
+  error,
+  onClose,
+  onSave,
+}: {
+  inviteItem: Invite
+  saving: boolean
+  error: string | null
+  onClose: () => void
+  onSave: (changes: { name?: string; email: string; phone?: string }) => void
+}) {
+  const [name, setName] = useState(inviteItem.name ?? '')
+  const [email, setEmail] = useState(inviteItem.email)
+  const [phone, setPhone] = useState(inviteItem.phone ?? '')
+  const caregiver = inviteItem.role === 'caregiver'
+
+  return (
+    <Modal title={inviteItem.name ? `Editar a ${inviteItem.name}` : 'Completar invitación'} onClose={onClose}>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault()
+          onSave({ name: name.trim(), email: email.trim(), phone: phone.trim() })
+        }}
+      >
+        <p className="text-sm text-slate-600">
+          El nombre y el teléfono quedan en la persona. Cuando entre con este correo, se une a esta misma ficha.
+        </p>
+        {caregiver ? (
+          <>
+            <FieldLabel htmlFor="edit-invite-name">Nombre</FieldLabel>
+            <input
+              id="edit-invite-name"
+              required
+              maxLength={120}
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              className={fieldClass}
+            />
+          </>
+        ) : null}
+        <FieldLabel htmlFor="edit-invite-email">Correo</FieldLabel>
+        <input
+          id="edit-invite-email"
+          type="email"
+          required
+          maxLength={254}
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          className={fieldClass}
+        />
+        {caregiver ? (
+          <>
+            <FieldLabel htmlFor="edit-invite-phone">Teléfono (opcional)</FieldLabel>
+            <input
+              id="edit-invite-phone"
+              type="tel"
+              maxLength={24}
+              value={phone}
+              onChange={(event) => setPhone(event.target.value)}
+              placeholder="+56 9 1234 5678"
+              className={fieldClass}
+            />
+          </>
+        ) : null}
+        {error ? (
+          <p role="alert" className="mt-3 text-sm font-medium text-red-700">
+            {error}
+          </p>
+        ) : null}
+        <button
+          type="submit"
+          disabled={saving || email.trim() === '' || (caregiver && name.trim() === '')}
+          className="mt-4 rounded-full bg-blue-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-60"
+        >
+          {saving ? 'Guardando…' : 'Guardar'}
+        </button>
+      </form>
+    </Modal>
   )
 }

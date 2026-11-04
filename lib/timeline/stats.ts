@@ -30,7 +30,13 @@ export type PressurePoint = {
 
 export type AppointmentCount = { status: AppointmentStatus; count: number }
 
-export type CoverageRecord = { personId: string; coveredOn: string; hour: number; caregiverName: string }
+export type CoverageRecord = {
+  personId: string
+  coveredOn: string
+  hour: number
+  caregiverName: string
+  rateClp?: number
+}
 
 export type CoverageDay = { day: string; covered: number; shared: number; care: CareDayKind }
 

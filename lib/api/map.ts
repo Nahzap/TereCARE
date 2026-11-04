@@ -123,17 +123,22 @@ export function compareMembers(a: Member, b: Member) {
   return left.localeCompare(right, 'es', { sensitivity: 'base' })
 }
 
-export function mapInvite(row: {
-  id: string
-  email: string
-  role: string
-  created_at: string
-}): Invite {
+export function mapInvite(
+  row: {
+    id: string
+    email: string
+    role: string
+    created_at: string
+  },
+  person?: { name: string; phone: string | null } | null,
+): Invite {
   return {
     id: row.id,
     email: row.email,
     role: asInviteRole(row.role),
     createdAt: row.created_at,
+    name: person?.name ?? null,
+    phone: person?.phone ?? null,
   }
 }
 

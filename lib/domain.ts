@@ -53,6 +53,8 @@ export type Invite = {
   email: string
   role: 'caregiver' | 'viewer'
   createdAt: string
+  name: string | null
+  phone: string | null
 }
 
 export type WeekPayload = {

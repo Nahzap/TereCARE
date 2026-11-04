@@ -5,7 +5,9 @@ import { context, jsonError, requireRole, respond, type AppClient } from '@/lib/
 import { asRows, mapSlot, normalizeDate, SLOT_COLUMNS, type SlotRow } from '@/lib/api/map'
 import { loadPeople, PeopleMissingError } from '@/lib/api/people'
 import { loadExpenses } from '@/lib/api/expenses'
+import { loadHourRates } from '@/lib/api/hour-rates'
 import { loadSituation, SituationMissingError } from '@/lib/api/care-situation'
+import { contributionStats } from '@/lib/contributions/equivalent'
 import { expenseHorizon, expenseStats, EXPENSE_DETAIL_LABEL, formatPesos } from '@/lib/expenses/expense'
 import { mapPressure, type PressureRow } from '@/lib/pressure/map'
 import type { CareSituation } from '@/lib/care/situation'
@@ -23,7 +25,7 @@ import { localDateTimeToUtc, utcToLocalDateTime } from '@/lib/time/zoned'
 
 type Context = { params: Promise<{ id: string }> }
 
-type CoverageRow = { id: string; person_id: string; covered_on: string; hour: number }
+type CoverageRow = { id: string; person_id: string; covered_on: string; hour: number; rate_clp?: number | null }
 
 const PAGE_SIZE = 1000
 
@@ -37,10 +39,12 @@ async function loadCoverage(supabase: AppClient, patientId: string, from: string
   }
   const seen = new Set<string>()
   const records: CoverageRecord[] = []
+  let withRate = true
   for (let page = 0; page < 20; page += 1) {
+    const columns = withRate ? 'id, person_id, covered_on, hour, rate_clp' : 'id, person_id, covered_on, hour'
     const { data, error } = await supabase
       .from('care_coverages')
-      .select('id, person_id, covered_on, hour')
+      .select(columns)
       .eq('patient_id', patientId)
       .gte('covered_on', from)
       .lte('covered_on', to)
@@ -48,6 +52,11 @@ async function loadCoverage(supabase: AppClient, patientId: string, from: string
       .order('hour', { ascending: true })
       .order('person_id', { ascending: true })
       .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1)
+    if (error && withRate && (error.code === '42703' || error.message?.includes('rate_clp'))) {
+      withRate = false
+      page -= 1
+      continue
+    }
     if (error) return null
     const batch = asRows<CoverageRow>(data)
     if (batch.length === 0 || (batch[0] && seen.has(batch[0].id))) break
@@ -59,6 +68,7 @@ async function loadCoverage(supabase: AppClient, patientId: string, from: string
         coveredOn: normalizeDate(row.covered_on) ?? row.covered_on,
         hour: row.hour,
         caregiverName: names.get(row.person_id) ?? 'Cuidador',
+        rateClp: row.rate_clp ?? undefined,
       })
     }
     if (batch.length < PAGE_SIZE) break
@@ -86,44 +96,47 @@ export async function GET(request: NextRequest, { params }: Context) {
     const toInstant = localDateTimeToUtc(`${range.to}T23:59`)
     const todayStart = localDateTimeToUtc(`${today}T00:00`)
 
-    const [slotsResult, marksResult, pressureResult, appointmentsResult, nextResult, coverage, situation, expenses] = await Promise.all([
-      session.supabase
-        .from('medication_slots')
-        .select(`${SLOT_COLUMNS}, created_at`)
-        .eq('patient_id', id),
-      session.supabase
-        .from('dose_marks')
-        .select('slot_id, taken_on, profiles(full_name, email)')
-        .eq('patient_id', id)
-        .gte('taken_on', range.from)
-        .lte('taken_on', range.to),
-      session.supabase
-        .from('blood_pressure_readings')
-        .select('id, patient_id, measured_at, systolic, diastolic, pulse, day_part, reading_order, note, profiles(full_name, email)')
-        .eq('patient_id', id)
-        .gte('measured_at', fromInstant)
-        .lte('measured_at', toInstant),
-      session.supabase
-        .from('appointments')
-        .select(APPOINTMENT_COLUMNS)
-        .eq('patient_id', id)
-        .gte('starts_at', fromInstant)
-        .lte('starts_at', toInstant),
-      session.supabase
-        .from('appointments')
-        .select(APPOINTMENT_COLUMNS)
-        .eq('patient_id', id)
-        .eq('status', 'programada')
-        .gte('starts_at', todayStart)
-        .order('starts_at', { ascending: true })
-        .limit(1),
-      loadCoverage(session.supabase, id, range.from, range.to),
-      loadSituation(session.supabase, id).catch((error: unknown) => {
-        if (error instanceof SituationMissingError) return null
-        throw error
-      }),
-      loadExpenses(session.supabase, id),
-    ])
+    const expenseWindow = expenseHorizon(range.from, range.to)
+    const [slotsResult, marksResult, pressureResult, appointmentsResult, nextResult, coverage, situation, expenses, rates] =
+      await Promise.all([
+        session.supabase
+          .from('medication_slots')
+          .select(`${SLOT_COLUMNS}, created_at`)
+          .eq('patient_id', id),
+        session.supabase
+          .from('dose_marks')
+          .select('slot_id, taken_on, profiles(full_name, email)')
+          .eq('patient_id', id)
+          .gte('taken_on', range.from)
+          .lte('taken_on', range.to),
+        session.supabase
+          .from('blood_pressure_readings')
+          .select('id, patient_id, measured_at, systolic, diastolic, pulse, day_part, reading_order, note, profiles(full_name, email)')
+          .eq('patient_id', id)
+          .gte('measured_at', fromInstant)
+          .lte('measured_at', toInstant),
+        session.supabase
+          .from('appointments')
+          .select(APPOINTMENT_COLUMNS)
+          .eq('patient_id', id)
+          .gte('starts_at', fromInstant)
+          .lte('starts_at', toInstant),
+        session.supabase
+          .from('appointments')
+          .select(APPOINTMENT_COLUMNS)
+          .eq('patient_id', id)
+          .eq('status', 'programada')
+          .gte('starts_at', todayStart)
+          .order('starts_at', { ascending: true })
+          .limit(1),
+        loadCoverage(session.supabase, id, expenseWindow.from, expenseWindow.to),
+        loadSituation(session.supabase, id).catch((error: unknown) => {
+          if (error instanceof SituationMissingError) return null
+          throw error
+        }),
+        loadExpenses(session.supabase, id),
+        loadHourRates(session.supabase, id),
+      ])
 
     for (const result of [slotsResult, marksResult, pressureResult, appointmentsResult, nextResult]) {
       if (result.error) throw result.error
@@ -190,15 +203,16 @@ export async function GET(request: NextRequest, { params }: Context) {
     if (expenses) {
       const horizon = expenseHorizon(range.from, range.to)
       for (const expense of expenses) {
-        if (expense.payment === 'cubierto') continue
         if (expense.spentOn < horizon.from || expense.spentOn > horizon.to) continue
         events.push({
           id: `expense-${expense.id}`,
           at: localDateTimeToUtc(`${expense.spentOn}T12:00`),
           localDate: expense.spentOn,
           kind: 'expense',
-          title: EXPENSE_DETAIL_LABEL[expense.detail],
-          detail: expense.buyerName,
+          title: expense.note || EXPENSE_DETAIL_LABEL[expense.detail],
+          detail: expense.note
+            ? [EXPENSE_DETAIL_LABEL[expense.detail], expense.buyerName].filter(Boolean).join(' · ')
+            : expense.buyerName,
           time: formatPesos(expense.amount),
           money: expense.amount,
           payment: expense.payment,
@@ -217,6 +231,26 @@ export async function GET(request: NextRequest, { params }: Context) {
       care,
     )
 
+    const expenseStatsPayload = expenses ? expenseStats(expenses, range.from, range.to, today) : null
+    const hourRates = rates ?? []
+    const contributions =
+      expenses || coverage
+        ? contributionStats({
+            from: expenseWindow.from,
+            to: expenseWindow.to,
+            today,
+            expenses: expenses ?? [],
+            hours: (coverage ?? []).map((row) => ({
+              personId: row.personId,
+              caregiverName: row.caregiverName,
+              coveredOn: row.coveredOn,
+              rateClp: row.rateClp ?? 0,
+            })),
+            rates: hourRates,
+            situation: care,
+          })
+        : null
+
     return NextResponse.json({
       from: range.from,
       to: range.to,
@@ -226,8 +260,8 @@ export async function GET(request: NextRequest, { params }: Context) {
       pressure: pressureSeries(readings),
       appointments: appointmentCounts(appointments),
       coverage: coverage ? coverageStats(coverage, range.from, range.to, care) : null,
-      expenses: expenses ? expenseStats(expenses, range.from, range.to, today) : null,
-      coverage: coverage ? coverageStats(coverage, range.from, range.to, care) : null,
+      expenses: expenseStatsPayload,
+      contributions,
       nextAppointment: nextRow ? mapAppointment(nextRow) : null,
       events,
     })

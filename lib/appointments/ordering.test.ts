@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { appointmentDayLabel, groupAppointments, type AppointmentMoment } from './ordering'
+import { appointmentDayLabel, groupAppointments, sortAppointmentsByStart, type AppointmentMoment } from './ordering'
 
 function item(partial: Partial<AppointmentMoment> & Pick<AppointmentMoment, 'id' | 'startsAt' | 'localDate'>): AppointmentMoment {
   return { status: 'programada', ...partial }
@@ -7,6 +7,15 @@ function item(partial: Partial<AppointmentMoment> & Pick<AppointmentMoment, 'id'
 
 describe('appointment order', () => {
   const today = '2026-10-28'
+
+  it('sorts every visit by date and time from nearest to furthest', () => {
+    const ordered = sortAppointmentsByStart([
+      item({ id: 'b', startsAt: '2026-11-02T15:00:00.000Z', localDate: '2026-11-02' }),
+      item({ id: 'a', startsAt: '2026-10-28T18:00:00.000Z', localDate: '2026-10-28' }),
+      item({ id: 'c', startsAt: '2026-10-28T14:00:00.000Z', localDate: '2026-10-28' }),
+    ])
+    expect(ordered.map((entry) => entry.id)).toEqual(['c', 'a', 'b'])
+  })
 
   it('puts the nearest future visit first and keeps later ones after it', () => {
     const groups = groupAppointments(
@@ -30,7 +39,7 @@ describe('appointment order', () => {
     expect(groups.overdue.map((entry) => entry.id)).toEqual(['late'])
   })
 
-  it('lists attended and cancelled visits from newest to oldest', () => {
+  it('lists attended and cancelled visits in chronological order', () => {
     const groups = groupAppointments(
       [
         item({ id: 'old', startsAt: '2026-09-01T15:00:00.000Z', localDate: '2026-09-01', status: 'asistio' }),
@@ -38,6 +47,6 @@ describe('appointment order', () => {
       ],
       today,
     )
-    expect(groups.past.map((entry) => entry.id)).toEqual(['new', 'old'])
+    expect(groups.past.map((entry) => entry.id)).toEqual(['old', 'new'])
   })
 })

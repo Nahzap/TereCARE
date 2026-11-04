@@ -15,6 +15,7 @@ const today = '2026-11-02'
 function expense(partial: Partial<Expense> & Pick<Expense, 'id' | 'spentOn' | 'payment' | 'amount'>): Expense {
   return {
     detail: 'medicamentos',
+    note: '',
     personId: 'ana',
     buyerName: 'Ana',
     installments: null,
@@ -92,18 +93,29 @@ describe('expenses', () => {
     expect(groups.map((group) => group.id)).toEqual(['pending', 'installing', 'upcoming', 'paid'])
   })
 
-  it('leaves a covered expense out of the totals', () => {
+  it('counts every annotated expense as a caregiver contribution over time', () => {
     const stats = expenseStats(
       [
-        expense({ id: 'back', spentOn: '2026-11-01', payment: 'cubierto', amount: 40000, detail: 'medicamentos' }),
-        expense({ id: 'paid', spentOn: '2026-11-01', payment: 'pagado', amount: 1000 }),
+        expense({ id: 'back', spentOn: '2026-11-01', payment: 'cubierto', amount: 40000, detail: 'medicamentos', personId: 'ana', buyerName: 'Ana' }),
+        expense({ id: 'paid', spentOn: '2026-11-01', payment: 'pagado', amount: 1000, personId: 'pilar', buyerName: 'Pilar' }),
+        expense({ id: 'later', spentOn: '2026-11-02', payment: 'pagado', amount: 500, personId: 'pilar', buyerName: 'Pilar' }),
       ],
       '2026-10-27',
       '2026-11-02',
       today,
     )
-    expect(stats.paidAmount).toBe(1000)
+    expect(stats.paidAmount).toBe(1500)
+    expect(stats.coveredAmount).toBe(40000)
+    expect(stats.contributedAmount).toBe(41500)
     expect(stats.stillOwed).toBe(0)
-    expect(stats.days.find((day) => day.day === '2026-11-01')).toMatchObject({ paid: 1000, pending: 0, installing: 0 })
+    expect(stats.days.find((day) => day.day === '2026-11-01')).toMatchObject({ paid: 1000, covered: 40000 })
+    expect(stats.buyerLines.map((buyer) => ({ label: buyer.label, total: buyer.total }))).toEqual([
+      { label: 'Ana', total: 40000 },
+      { label: 'Pilar', total: 1500 },
+    ])
+    const last = stats.cumulativeDays.at(-1)
+    expect(last?.amounts.ana).toBe(40000)
+    expect(last?.amounts.pilar).toBe(1500)
+    expect(last?.total).toBe(41500)
   })
 })

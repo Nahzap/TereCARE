@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { buildPeople, mergeTargets, personCreateSchema, personMergeSchema, personStatus, personUpdateSchema } from './people'
+import {
+  buildPeople,
+  inviteDraftSchema,
+  mergeTargets,
+  personCreateSchema,
+  personMergeSchema,
+  personStatus,
+  personUpdateSchema,
+} from './people'
 
 describe('care people', () => {
   const rows = [
@@ -23,6 +31,7 @@ describe('care people', () => {
     ])
     expect(people[0]?.email).toBe('rodrigo@gmail.com')
     expect(people[1]?.name).toBe('Pilar')
+    expect(people[1]?.phone).toBeNull()
   })
 
   it('describes whether each person already has an account', () => {
@@ -46,7 +55,12 @@ describe('care people', () => {
     expect(personCreateSchema.parse({ name: 'Pilar', email: '' }).email).toBe('')
     expect(personCreateSchema.safeParse({ name: ' ' }).success).toBe(false)
     expect(personCreateSchema.safeParse({ name: 'Pilar', email: 'no-es-correo' }).success).toBe(false)
+    expect(personCreateSchema.parse({ name: 'Pilar', phone: ' +56 9 1234 5678 ' }).phone).toBe('+56 9 1234 5678')
+    expect(personCreateSchema.safeParse({ name: 'Pilar', phone: '123' }).success).toBe(false)
+    expect(personUpdateSchema.parse({ phone: '' }).phone).toBe('')
     expect(personUpdateSchema.safeParse({}).success).toBe(false)
+    expect(inviteDraftSchema.safeParse({ email: 'danny@gmail.com', role: 'caregiver' }).success).toBe(false)
+    expect(inviteDraftSchema.parse({ email: 'danny@gmail.com', role: 'caregiver', name: ' Danny ' }).name).toBe('Danny')
     expect(personMergeSchema.safeParse({ targetId: 'x' }).success).toBe(false)
   })
 })

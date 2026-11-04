@@ -57,6 +57,7 @@ export async function POST(request: Request, { params }: Context) {
         spent_on: body.data.spentOn,
         payment: body.data.payment,
         detail: body.data.detail,
+        note: body.data.note,
         amount: body.data.amount,
         installments: body.data.payment === 'pagandose' ? body.data.installments : null,
         ends_on: body.data.payment === 'pagandose' ? body.data.endsOn : null,

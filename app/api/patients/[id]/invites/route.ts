@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
-import { inviteBodySchema } from '@/lib/validation'
 import { context, isOwner, isUniqueViolation, jsonError, parseBody, requireRole, respond } from '@/lib/api/guard'
 import { asRows, mapInvite, profileEmail } from '@/lib/api/map'
+import { prepareCaregiver } from '@/lib/api/people-admin'
+import { cleanPhone, inviteDraftSchema } from '@/lib/coverage/people'
 
 type Context = { params: Promise<{ id: string }> }
 
@@ -14,9 +15,11 @@ export async function POST(request: Request, { params }: Context) {
     if ('response' in access) return access.response
     if (!isOwner(access.role)) return jsonError('Solo el dueño puede invitar', 403)
 
-    const body = await parseBody(request, inviteBodySchema)
+    const body = await parseBody(request, inviteDraftSchema)
     if ('response' in body) return body.response
     const email = body.data.email.trim().toLowerCase()
+    const phone = cleanPhone(body.data.phone)
+    const name = body.data.name?.trim() ?? ''
 
     const members = await session.supabase
       .from('patient_members')
@@ -27,6 +30,25 @@ export async function POST(request: Request, { params }: Context) {
       (row) => profileEmail(row.profiles) === email,
     )
     if (already) return jsonError('Esa persona ya tiene acceso', 409)
+
+    let createdId: string | null = null
+    let phoneSaved = true
+    if (body.data.role === 'caregiver') {
+      const pending = await session.supabase
+        .from('patient_invites')
+        .select('id')
+        .eq('patient_id', id)
+        .eq('email', email)
+        .is('accepted_at', null)
+        .maybeSingle()
+      if (pending.error) throw pending.error
+      if (pending.data) return jsonError('Ese correo ya está invitado', 409)
+
+      const prepared = await prepareCaregiver(session.supabase, id, session.user.id, { name, email, phone })
+      if ('error' in prepared) return jsonError(prepared.error, prepared.status)
+      createdId = prepared.createdId
+      phoneSaved = prepared.phoneSaved
+    }
 
     const inserted = await session.supabase
       .from('patient_invites')
@@ -40,12 +62,18 @@ export async function POST(request: Request, { params }: Context) {
       .maybeSingle()
 
     if (inserted.error) {
+      if (createdId) {
+        await session.supabase.from('care_people').delete().eq('id', createdId).eq('patient_id', id)
+      }
       if (isUniqueViolation(inserted.error)) {
         return jsonError('Ese correo ya está invitado', 409)
       }
       throw inserted.error
     }
     if (!inserted.data) throw new Error('No se pudo crear la invitación')
-    return NextResponse.json(mapInvite(inserted.data), { status: 201 })
+    return NextResponse.json(
+      { ...mapInvite(inserted.data, name ? { name, phone: phoneSaved ? phone : null } : null), phoneSaved },
+      { status: 201 },
+    )
   })
 }
