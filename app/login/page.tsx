@@ -1,116 +1,129 @@
 'use client'
 
-import { GithubLogo, Pill } from '@phosphor-icons/react'
+import { Pill } from '@phosphor-icons/react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Suspense, useState } from 'react'
+import { accountError, passwordError, PASSWORD_MIN } from '@/lib/auth/password'
 import { createClient } from '@/lib/supabase/client'
-
-type Provider = 'github' | 'google'
-
-function accountError(message: string) {
-  const text = message.toLowerCase()
-  if (text.includes('invalid login credentials')) return 'Correo o contraseña incorrectos.'
-  if (text.includes('email not confirmed')) return 'Confirma el correo antes de entrar. Revisa la bandeja y el spam.'
-  if (text.includes('already registered') || text.includes('already been registered')) {
-    return 'Esa cuenta ya existe. Entra con tu contraseña.'
-  }
-  if (text.includes('password')) return 'La contraseña necesita al menos 6 caracteres.'
-  if (text.includes('email')) return 'Ese correo no es válido.'
-  return message
-}
-
-function authFailureMessage(reason: string | null) {
-  if (reason?.toLowerCase().includes('exchange external code')) {
-    return 'Google rechazó el secreto. En Google Cloud crea un Client secret nuevo y pégalo en Supabase, en Google → Client Secret, y guarda.'
-  }
-  if (reason) return reason
-  return 'No se pudo iniciar sesión. Intenta de nuevo.'
-}
 
 function LoginCard() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const [mode, setMode] = useState<'create' | 'enter'>('create')
+  const nextPath = searchParams.get('next') || '/pacientes'
+  const [mode, setMode] = useState<'enter' | 'join'>('enter')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [message, setMessage] = useState<string | null>(
-    searchParams.get('error') === 'auth' ? authFailureMessage(searchParams.get('reason')) : null,
+    searchParams.get('error') === 'auth' ? 'No se pudo completar el acceso. Intenta de nuevo.' : null,
   )
   const [info, setInfo] = useState<string | null>(null)
-  const [pending, setPending] = useState<'account' | Provider | null>(null)
+  const [pending, setPending] = useState(false)
+
+  async function ensureInvited(targetEmail: string) {
+    const response = await fetch('/api/auth/invite-status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: targetEmail }),
+    })
+    const payload = (await response.json().catch(() => null)) as { allowed?: boolean; error?: string } | null
+    if (!response.ok) {
+      throw new Error(payload?.error ?? 'No se pudo verificar la invitación')
+    }
+    if (!payload?.allowed) {
+      throw new Error('Ese correo no tiene invitación. Pide acceso al dueño de la ficha.')
+    }
+  }
+
+  async function requestPasswordMail() {
+    setMessage(null)
+    setInfo(null)
+    const trimmedEmail = email.trim().toLowerCase()
+    if (!trimmedEmail) {
+      setMessage('Escribe tu correo para enviarte el enlace.')
+      return
+    }
+    setPending(true)
+    try {
+      await ensureInvited(trimmedEmail)
+      const supabase = createClient()
+      const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail, {
+        redirectTo: `${window.location.origin}/auth/callback?next=definir-contrasena`,
+      })
+      if (error) {
+        setMessage(accountError(error.message))
+        return
+      }
+      setInfo('Te enviamos un correo para definir o recuperar tu contraseña. Abre el enlace y elige una clave nueva.')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'No se pudo enviar el correo')
+    } finally {
+      setPending(false)
+    }
+  }
 
   async function submitAccount(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setMessage(null)
     setInfo(null)
-    setPending('account')
+    const trimmedEmail = email.trim().toLowerCase()
+    const strength = passwordError(password)
+    if (strength) {
+      setMessage(strength)
+      return
+    }
+    setPending(true)
     try {
       const supabase = createClient()
-      const credentials = { email: email.trim(), password }
-      if (mode === 'create') {
+      if (mode === 'join') {
+        await ensureInvited(trimmedEmail)
         const { data, error } = await supabase.auth.signUp({
-          ...credentials,
+          email: trimmedEmail,
+          password,
           options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
         })
         if (error) {
-          setMessage(accountError(error.message))
+          const mapped = accountError(error.message)
+          const already =
+            /already registered|already been registered|user already exists/i.test(error.message)
+          if (already) {
+            setMode('enter')
+            setMessage(
+              'Esa cuenta ya existe. Pulsa «No tengo contraseña / olvidé la mía» para definir tu clave por correo.',
+            )
+            return
+          }
+          setMessage(mapped)
           return
         }
         if (data.session) {
-          router.push('/pacientes')
+          router.push(nextPath.startsWith('/') ? nextPath : '/pacientes')
+          router.refresh()
           return
         }
-        setInfo('Cuenta creada. Revisa tu correo, abre el enlace de confirmación y después entra con la misma contraseña.')
+        // Usuario ya existía (p. ej. OAuth): Supabase no crea sesión ni error claro.
+        if (data.user && (data.user.identities?.length ?? 0) === 0) {
+          setMode('enter')
+          setMessage(
+            'Esa cuenta ya existe. Pulsa «No tengo contraseña / olvidé la mía» para definir tu clave por correo.',
+          )
+          return
+        }
+        setInfo('Cuenta creada. Revisa tu correo, confirma el enlace y después entra con la misma contraseña.')
         setMode('enter')
         return
       }
 
-      const { error } = await supabase.auth.signInWithPassword(credentials)
+      const { error } = await supabase.auth.signInWithPassword({ email: trimmedEmail, password })
       if (error) {
         setMessage(accountError(error.message))
         return
       }
-      router.push('/pacientes')
+      router.push(nextPath.startsWith('/') ? nextPath : '/pacientes')
+      router.refresh()
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'No se pudo crear la cuenta')
+      setMessage(error instanceof Error ? error.message : 'No se pudo completar el acceso')
     } finally {
-      setPending(null)
-    }
-  }
-
-  async function signIn(provider: Provider) {
-    setMessage(null)
-    setInfo(null)
-    setPending(provider)
-    try {
-      const base = process.env.NEXT_PUBLIC_SUPABASE_URL
-      const key =
-        process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-      if (base && key) {
-        const settingsResponse = await fetch(`${base}/auth/v1/settings`, { headers: { apikey: key } })
-        if (settingsResponse.ok) {
-          const settings = (await settingsResponse.json()) as { external?: Record<string, boolean> }
-          if (!settings.external?.[provider]) {
-            setMessage(
-              provider === 'github'
-                ? 'GitHub todavía no está activado. Crea la cuenta con tu correo.'
-                : 'Google todavía no está activado. Crea la cuenta con tu correo.',
-            )
-            return
-          }
-        }
-      }
-
-      const supabase = createClient()
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider,
-        options: { redirectTo: `${window.location.origin}/auth/callback` },
-      })
-      if (error) setMessage(accountError(error.message))
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'No se pudo iniciar sesión')
-    } finally {
-      setPending(null)
+      setPending(false)
     }
   }
 
@@ -119,7 +132,9 @@ function LoginCard() {
       <div className="flex flex-col items-center text-center">
         <Pill size={40} weight="duotone" className="text-blue-700" aria-hidden="true" />
         <h1 className="mt-4 text-2xl font-semibold text-slate-900">TereCARE</h1>
-        <p className="mt-2 text-sm text-slate-600">Esquema de medicamentos para cuidadores</p>
+        <p className="mt-2 text-sm text-slate-600">
+          Acceso privado. Solo correos invitados por el dueño de la ficha.
+        </p>
       </div>
 
       <form onSubmit={submitAccount} className="mt-6 space-y-3">
@@ -142,53 +157,48 @@ function LoginCard() {
           id="password"
           type="password"
           required
-          minLength={6}
-          autoComplete={mode === 'create' ? 'new-password' : 'current-password'}
+          minLength={PASSWORD_MIN}
+          autoComplete={mode === 'join' ? 'new-password' : 'current-password'}
           value={password}
           onChange={(event) => setPassword(event.target.value)}
           className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-700"
         />
+        <p className="text-xs text-slate-500">Mínimo {PASSWORD_MIN} caracteres, con letras y al menos un número.</p>
         {message ? <p className="text-sm text-red-700">{message}</p> : null}
         {info ? <p className="text-sm text-emerald-800">{info}</p> : null}
         <button
           type="submit"
-          disabled={pending !== null}
+          disabled={pending}
           className="w-full rounded-lg bg-blue-700 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-800 disabled:opacity-60"
         >
-          {pending === 'account' ? 'Un momento…' : mode === 'create' ? 'Crear cuenta' : 'Entrar'}
+          {pending ? 'Un momento…' : mode === 'join' ? 'Crear acceso con mi invitación' : 'Entrar'}
+        </button>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={requestPasswordMail}
+          className="w-full text-sm font-semibold text-blue-700 hover:text-blue-900 disabled:opacity-60"
+        >
+          No tengo contraseña / olvidé la mía
         </button>
         <button
           type="button"
           onClick={() => {
-            setMode(mode === 'create' ? 'enter' : 'create')
+            setMode(mode === 'join' ? 'enter' : 'join')
             setMessage(null)
             setInfo(null)
           }}
           className="w-full text-sm font-semibold text-slate-600 hover:text-slate-900"
         >
-          {mode === 'create' ? 'Ya tengo cuenta' : 'Crear una cuenta nueva'}
+          {mode === 'join' ? 'Ya tengo contraseña · volver a Entrar' : 'Me invitaron y es mi primera vez'}
         </button>
+        {mode === 'join' ? (
+          <p className="text-xs text-slate-500">
+            Si antes entrabas con Google u otro método y nunca elegiste clave, no uses este formulario: vuelve a
+            Entrar y pulsa «No tengo contraseña».
+          </p>
+        ) : null}
       </form>
-
-      <div className="mt-6 border-t border-slate-200 pt-6">
-        <button
-          type="button"
-          onClick={() => signIn('github')}
-          disabled={pending !== null}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
-        >
-          <GithubLogo size={18} weight="fill" aria-hidden="true" />
-          {pending === 'github' ? 'Abriendo GitHub…' : 'Continuar con GitHub'}
-        </button>
-        <button
-          type="button"
-          onClick={() => signIn('google')}
-          disabled={pending !== null}
-          className="mt-3 w-full rounded-lg border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-60"
-        >
-          {pending === 'google' ? 'Abriendo Google…' : 'Continuar con Google'}
-        </button>
-      </div>
     </div>
   )
 }
@@ -199,7 +209,7 @@ export default function LoginPage() {
       <Suspense
         fallback={
           <div className="w-full max-w-sm rounded-2xl bg-white px-8 py-10 text-center text-sm text-slate-600 shadow-sm">
-            Esquema de medicamentos para cuidadores
+            Acceso privado para cuidadores invitados
           </div>
         }
       >

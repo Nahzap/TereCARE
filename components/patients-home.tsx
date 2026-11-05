@@ -8,6 +8,7 @@ import type { Me, PatientListItem } from '@/lib/domain'
 import { api, errorText } from '@/components/api'
 import { ROLE_LABEL } from '@/components/format'
 import { FieldLabel, Modal, fieldClass } from '@/components/modal'
+import { createClient } from '@/lib/supabase/client'
 
 export function PatientsHome() {
   const router = useRouter()
@@ -55,7 +56,13 @@ export function PatientsHome() {
             {displayName ? <p className="text-sm text-slate-600">{displayName}</p> : null}
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href="/perfil"
+            className="inline-flex items-center justify-center rounded-full bg-white px-4 py-2.5 text-sm font-bold text-slate-800 ring-1 ring-slate-200 hover:bg-slate-50"
+          >
+            Mi perfil
+          </Link>
           <Link
             href="/acceso"
             className="inline-flex items-center justify-center rounded-full bg-white px-4 py-2.5 text-sm font-bold text-slate-800 ring-1 ring-slate-200 hover:bg-slate-50"
@@ -69,6 +76,18 @@ export function PatientsHome() {
           >
             <Plus size={16} weight="bold" aria-hidden />
             Nuevo paciente
+          </button>
+          <button
+            type="button"
+            onClick={async () => {
+              const supabase = createClient()
+              await supabase.auth.signOut()
+              router.push('/login')
+              router.refresh()
+            }}
+            className="inline-flex items-center justify-center rounded-full px-4 py-2.5 text-sm font-bold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50"
+          >
+            Salir
           </button>
         </div>
       </header>

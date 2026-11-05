@@ -51,13 +51,22 @@ export async function updateSession(request: NextRequest) {
 
   const path = request.nextUrl.pathname
 
-  if (!user && path.startsWith('/pacientes')) {
+  const publicApi =
+    path === '/api/auth/invite-status' || path.startsWith('/api/auth/invite-status/')
+  const privateApp =
+    path.startsWith('/pacientes') ||
+    path.startsWith('/acceso') ||
+    path.startsWith('/perfil') ||
+    path.startsWith('/definir-contrasena')
+
+  if (!user && privateApp) {
     const redirectUrl = request.nextUrl.clone()
     redirectUrl.pathname = '/login'
+    redirectUrl.searchParams.set('next', path)
     return applySessionCookies(NextResponse.redirect(redirectUrl), pendingCookies, pendingHeaders)
   }
 
-  if (!user && path.startsWith('/api')) {
+  if (!user && path.startsWith('/api') && !publicApi) {
     return applySessionCookies(
       NextResponse.json({ error: 'No has iniciado sesión' }, { status: 401 }),
       pendingCookies,

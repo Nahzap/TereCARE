@@ -30,6 +30,7 @@ export function PatientSectionNav({
       href: `/pacientes/${patientId}/cuidadores`,
       active: section === 'cuidadores',
     },
+    { key: 'perfil', label: 'Mi perfil', href: '/perfil', active: false },
   ]
 
   return (

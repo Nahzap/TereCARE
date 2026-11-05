@@ -106,6 +106,26 @@ export function CaregiversBoard({ patientId }: { patientId: string }) {
     }
   }
 
+  async function changeMemberRole(member: Member, nextRole: 'caregiver' | 'viewer') {
+    if (member.role === nextRole) return
+    setFormError(null)
+    setSaving(true)
+    try {
+      const updated = await api<Member>(`/api/patients/${patientId}/members/${member.userId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ role: nextRole }),
+      })
+      setMembers((current) => current.map((row) => (row.userId === updated.userId ? updated : row)))
+      showToast('Acceso actualizado')
+      setPeopleRevision((value) => value + 1)
+    } catch (reason) {
+      const message = errorText(reason)
+      if (message) setFormError(message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function removeInvite(inviteItem: Invite) {
     if (!window.confirm(`¿Cancelar la invitación a ${inviteItem.email}?`)) return
     setFormError(null)
@@ -205,7 +225,14 @@ export function CaregiversBoard({ patientId }: { patientId: string }) {
           />
           <CoverageBoard patientId={patientId} peopleRevision={peopleRevision} careRevision={careRevision} />
           <div className="max-w-2xl">
-          <ul data-jump="Cuentas con acceso" className="mt-6 grid gap-2">
+          <section data-jump="Cuentas con acceso" className="mt-6">
+            <h2 className="font-black">Cuentas con acceso</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              {isOwner
+                ? 'Tú administras a quienes ya se registraron: puedes cambiar el rol o quitar el acceso.'
+                : 'Personas con cuenta vinculada a esta ficha.'}
+            </p>
+          <ul className="mt-2 grid gap-2">
             {members.length === 0 ? (
               <li className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-6 text-sm text-slate-600">
                 Nadie tiene acceso todavía.
@@ -220,24 +247,43 @@ export function CaregiversBoard({ patientId }: { patientId: string }) {
                     <p className="font-bold">{member.fullName?.trim() || member.email}</p>
                     {member.fullName?.trim() ? <p className="text-sm text-slate-500">{member.email}</p> : null}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700">
-                      {ROLE_LABEL[member.role]}
-                    </span>
+                  <div className="flex flex-wrap items-center gap-2">
                     {isOwner && member.role !== 'owner' ? (
-                      <button
-                        type="button"
-                        onClick={() => removeMember(member)}
-                        className="rounded-full px-3 py-1.5 text-sm font-bold text-red-700 hover:bg-red-50"
-                      >
-                        Quitar
-                      </button>
-                    ) : null}
+                      <>
+                        <label className="sr-only" htmlFor={`role-${member.userId}`}>
+                          Rol de {member.fullName?.trim() || member.email}
+                        </label>
+                        <select
+                          id={`role-${member.userId}`}
+                          value={member.role === 'viewer' ? 'viewer' : 'caregiver'}
+                          disabled={saving}
+                          onChange={(event) =>
+                            changeMemberRole(member, event.target.value === 'viewer' ? 'viewer' : 'caregiver')
+                          }
+                          className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700"
+                        >
+                          <option value="caregiver">Cuidador</option>
+                          <option value="viewer">Solo lectura</option>
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => removeMember(member)}
+                          className="rounded-full px-3 py-1.5 text-sm font-bold text-red-700 hover:bg-red-50"
+                        >
+                          Quitar
+                        </button>
+                      </>
+                    ) : (
+                      <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700">
+                        {ROLE_LABEL[member.role]}
+                      </span>
+                    )}
                   </div>
                 </li>
               ))
             )}
           </ul>
+          </section>
 
           {formError ? (
             <p role="alert" className="mt-4 text-sm font-medium text-red-700">
@@ -249,7 +295,8 @@ export function CaregiversBoard({ patientId }: { patientId: string }) {
             <form data-jump="Invitar" onSubmit={invite} className="mt-6 rounded-2xl border border-slate-200 bg-white p-4">
               <h2 className="font-black">Invitar</h2>
               <p className="mt-1 text-sm text-slate-600">
-                Un cuidador lleva nombre, correo y teléfono. El nombre queda listo antes de que se registre con ese correo.
+                Solo tú como dueño puedes invitar. El cuidador entra después con ese correo y crea su contraseña. Nombre y
+                teléfono quedan listos antes de que se registre.
               </p>
               {role === 'caregiver' ? (
                 <>

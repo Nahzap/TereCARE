@@ -37,7 +37,12 @@ export async function GET(request: Request) {
     const { error: inviteError } = await supabase.rpc('accept_my_invites')
     if (inviteError) console.error(inviteError)
 
-    return NextResponse.redirect(`${origin}/pacientes`)
+    const nextParam = requestUrl.searchParams.get('next')
+    const goDefine =
+      type === 'recovery' ||
+      requestUrl.searchParams.get('type') === 'recovery' ||
+      nextParam === 'definir-contrasena'
+    return NextResponse.redirect(goDefine ? `${origin}/definir-contrasena` : `${origin}/pacientes`)
   } catch {
     return NextResponse.redirect(loginUrl)
   }
