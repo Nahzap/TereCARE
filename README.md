@@ -1,247 +1,237 @@
 # TereCARE
 
-TereCARE es la ficha compartida del cuidado de Teresa. Sirve para que la familia y quienes turnan sepan **qué hay que hacer**, **qué ya se hizo** y **quién aportó** —en tiempo y en dinero— sin depender de mensajes sueltos ni de cuadernos distintos.
+**Ficha compartida de cuidado domiciliario** — pensada primero para Teresa y su red familiar: una sola fuente de verdad para medicamentos, signos, citas, gastos, turnos y aportes (tiempo y dinero), sin depender de chats ni cuadernos paralelos.
 
-Este documento está escrito para un **usuario general**: qué tiene la aplicación, para qué sirve cada parte y qué puedes hacer en ella. No hace falta saber programar para usarla.
-
----
-
-## Para quién es
-
-- **Responsable (dueño de la ficha):** crea o administra la ficha, invita a la familia, define quién puede anotar y quién solo mira, y ve el panorama completo.
-- **Cuidador:** anota tomas, presión, citas, gastos y horas de cuidado en el horario.
-- **Consulta (solo lectura):** puede revisar la misma información sin modificarla.
-
-Todos ven **la misma ficha**. Lo que uno anota, el resto lo ve al actualizar.
+Este README describe **qué puede hacer el producto** y **cómo está construido**, con el nivel de detalle que se esperaría al evaluar un desarrollo de software moderno asistido por IA: dominio claro, restricciones de seguridad explícitas, trazabilidad contable y disciplina de entrega.
 
 ---
 
-## Cómo se abre (en este computador)
+## 1. Propuesta de valor
 
-1. Doble clic en `Start.cmd`.
-2. Inicia sesión con la cuenta que te dieron acceso.
-3. En **Inicio** elige la ficha (si hay más de una) o entra directo a Teresa.
+| Problema familiar | Respuesta de TereCARE |
+|-------------------|------------------------|
+| “¿Ya le dieron la pastilla?” | Posología semanal/diaria con marcas de toma |
+| “¿Cuánto midió la presión?” | Historial y tendencia en Dashboard |
+| “¿Cuándo es la próxima cita?” | Agenda con estados y orden cronológico |
+| “¿Quién pagó qué?” | Gastos tipados, con comprador y detalle libre |
+| “¿Quién cuida hoy / esta semana?” | Grilla horaria + fila de almuerzo |
+| “¿Cómo se reparte el esfuerzo?” | Aporte equivalente: dinero + horas + almuerzos valorizados |
 
-Si no puedes entrar, pide al responsable que te invite o te vincule en **Acceso**.
+Roles:
+
+- **Dueño (owner):** administra la ficha, invitaciones, acceso y puede editar **cualquier** turno/almuerzo.
+- **Cuidador (caregiver):** opera el día a día; en el horario **solo edita lo suyo**.
+- **Consulta (viewer):** lectura.
 
 ---
 
-## Mapa de la aplicación
+## 2. Capacidades por módulo
 
-En la ficha de Teresa verás secciones. También hay pantallas de **Inicio**, **Acceso** y **Cuidadores**.
+### 2.1 Posología
+
+- Plan de medicamentos por semana y vista por día.
+- Marcado de tomas administradas.
+- Conciencia de **situación de cuidado** (alta / hospitalización): días que no deben entrar en indicadores.
+
+### 2.2 Presión arterial
+
+- Altas, edición y borrado de lecturas (sistólica, diastólica, pulso, momento del día).
+- Serie temporal en Dashboard.
+
+### 2.3 Citas médicas
+
+- Alta / corrección / borrado.
+- Estados: programada, asistió, se perdió, cancelada.
+- Orden: pendientes de lo más cercano a lo más lejano; historial cronológico.
+- Edición estable (Corregir → Guardar / Cancelar) sin “parpadeo” de formulario.
+
+### 2.4 Gastos del cuidado
+
+- Tipos (medicamentos, cita, terapia, etc.) + **detalle libre**.
+- Estados de pago: pagado, pendiente, pagándose (cuotas), cubierto.
+- Comprador = persona de cuidado.
+- Montos enteros CLP; fechas (también futuras si se conoce el gasto).
+- Alimenta el gráfico de gastos acumulados y el aporte equivalente.
+
+### 2.5 Personas, cuidadores y acceso
+
+- Personas de cuidado con o sin cuenta (`care_people`), fusionables, invitables.
+- Nombre, correo, teléfono; invitaciones por rol cuidador/consulta.
+- Acceso a la ficha (miembros, roles); flujos de contraseña / vinculación según despliegue.
+- **Dueño** administra personas y acceso; el cuidador no reescribe el directorio ajeno.
+
+### 2.6 Horario de cuidado (cobertura)
+
+- Grilla **hora × día** (zona America/Santiago).
+- Pintura por rectángulo, varias personas por hora (franjas), goma, Guardar / Descartar.
+- Horizonte de planificación **hasta 90 días** hacia adelante; historial navegable.
+- Totales por persona (cumplidas vs planificadas) y resumen de cobertura.
+- Días hospital / pre-alta **excluidos** del indicador.
+
+#### Almuerzo (módulo aislado)
+
+- Fila **amarilla** entre **13:00 y 14:00**.
+- **No** cuenta como hora de cobertura (no distorsiona el `/24`).
+- 1 cuidador habitual; **máximo 2** por día.
+- Valorización: default **$9.000 CLP/día** y **1,5 h** configurables.
+- Sello histórico: reajustar tarifa **no reescribe** almuerzos ya anotados.
+
+#### Permisos en la grilla
+
+| Acción | Dueño | Cuidador |
+|--------|-------|----------|
+| Ver toda la grilla | Sí | Sí |
+| Pintar / borrar **su** horario y almuerzo | Sí | Sí |
+| Pintar / borrar **otro** cuidador | Sí | **No** (UI + API + trigger BD) |
+
+### 2.7 Dashboard
+
+Rango seleccionable (7 / 30 / 90 días):
+
+- Tomas de medicamentos por día  
+- Serie de presión  
+- Horas con cuidador (por día y por persona)  
+- Citas por estado  
+- **Gastos acumulados por cuidador** (líneas)  
+- **Aporte total equivalente** (dinero + horas selladas + almuerzos sellados)  
+- **Almuerzos valorizados** (líneas + reajuste de tarifa/horas)  
+- Desglose de gastos por tipo/comprador  
+- Registro unificado filtrable  
+
+Los gráficos comparten el mismo formato de tarjeta y altura de plot (`h-64`) en grilla de dos columnas.
+
+#### Reglas del aporte equivalente
+
+\[
+\text{aporte}_i = \text{dinero}_i + \sum \text{tarifa\_hora sellada} + \sum \text{tarifa\_almuerzo sellada}
+\]
+
+- Tarifa hora default: **$3.500 CLP/h** (referencia tipo TENS).  
+- Tarifa almuerzo default: **$9.000 CLP/día**.  
+- Cambios de tarifa: solo aplican hacia adelante.
+
+---
+
+## 3. Arquitectura técnica (visión de evaluación)
+
+| Capa | Elección |
+|------|----------|
+| App | **Next.js 16** (App Router) + **React 19** + TypeScript |
+| UI | Tailwind CSS 4; tipografía y layout orientados a uso diario familiar |
+| Auth / datos | **Supabase** (Auth, Postgres, RLS, RPC) |
+| Validación | **Zod** en bordes de API |
+| Gráficos | **Recharts** |
+| Tests | **Vitest** sobre dominio puro (cobertura, aportes, almuerzo, citas, gastos, fechas) |
+| Estilo de entrega | Commits correlativos (`1c`…`4c`) en `master`; docs locales con fecha/hora |
+
+### Patrones de diseño que importan
+
+1. **Dominio en `lib/`**, UI en `components/`, HTTP en `app/api/` — reglas de negocio testeables sin montar React.
+2. **Sello temporal de tarifas** (horas y almuerzos): contabilidad familiar auditable; el pasado no se reescribe.
+3. **Degradación controlada** si falta una migración (mensajes 503 claros; fallbacks en lecturas).
+4. **Defensa en profundidad** para turnos: UI + API + trigger Postgres.
+5. **Situación de cuidado** (alta/hospital) como filtro transversal de indicadores.
+6. **Personas ≠ cuentas**: `care_people` puede existir antes del login; luego se vincula sin perder historial.
+
+### Stack declarado (`package.json`)
+
+- Runtime: `next@16.4.3`, `react@19.3`, `@supabase/ssr` / `supabase-js`
+- Calidad: `typescript`, `eslint` + `eslint-config-next`, `vitest`
+- Visualización: `recharts`
+
+Scripts: `dev`, `build`, `start`, `lint`, `test`.
+
+---
+
+## 4. Mapa de la aplicación (usuario)
 
 | Dónde | Para qué |
 |-------|----------|
-| **Inicio** | Lista de fichas / personas a cargo. Punto de partida. |
-| **Posología** | Medicamentos de la semana y del día; marcar lo ya administrado. |
-| **Presión** | Mediciones de presión y pulso. |
-| **Citas** | Agenda médica: profesional, lugar, fecha, acompañante y estado. |
-| **Gastos** | Compras y pagos del cuidado: tipo, detalle, monto, quién pagó. |
-| **Dashboard** | Resumen del período: gráficos y registro unificado. |
-| **Cuidadores** | Personas del cuidado, invitaciones y **horario de quién cuida cada hora**. |
-| **Acceso** | Quién puede mirar o modificar la ficha. |
+| **Inicio** | Lista de fichas |
+| **Posología** | Medicamentos y tomas |
+| **Presión** | Mediciones |
+| **Citas** | Agenda médica |
+| **Gastos** | Dinero del cuidado |
+| **Dashboard** | Resumen e indicadores |
+| **Cuidadores** | Personas + **horario** (+ almuerzo) |
+| **Acceso** | Quién entra y con qué rol |
 
-Abajo o al costado suele haber ayudas para ir al final de la página o saltar a un bloque concreto de la sección.
-
----
-
-## Posología
-
-### Qué es
-
-El plan de medicamentos: a qué hora toca cada cosa, qué dosis, y si ya se dio.
-
-### Qué puedes hacer
-
-- Ver la **semana** (cambiar de semana si hace falta).
-- Ver el detalle del **día**, hora por hora.
-- **Marcar** una toma cuando se administró.
-- Corregir o ajustar el esquema si tienes permiso de edición (según el flujo de la ficha).
-
-### Para qué sirve
-
-Evita dudas del tipo “¿ya le dieron la pastilla de las 21:00?”. Quien llega de relevo ve lo pendiente y lo hecho.
+Arranque local típico: doble clic en `Start.cmd` → sesión → ficha.
 
 ---
 
-## Presión
+## 5. Seguridad y roles (resumen)
 
-### Qué es
+| Rol | Mirar | Anotar operativo | Editar horario ajeno | Administrar acceso/personas |
+|-----|-------|------------------|---------------------|-----------------------------|
+| Dueño | Sí | Sí | **Sí** | Sí |
+| Cuidador | Sí | Sí | **No** | No |
+| Consulta | Sí | No | No | No |
 
-El registro de mediciones de presión arterial (y pulso cuando se anota).
+RLS en tablas sensibles; mutaciones de cobertura/almuerzo validadas también en servidor y, tras la migración correspondiente, en triggers.
 
-### Qué puedes hacer
-
-- Anotar una medición con fecha/hora y valores.
-- Revisar el historial de lecturas.
-- Ver la tendencia en el **Dashboard**.
-
-### Para qué sirve
-
-Deja un rastro claro para la familia y para llevar a controles médicos, sin mezclar números en chats.
+La ficha contiene datos de salud y familia: el diseño asume **mínimo privilegio** y membresía explícita por paciente.
 
 ---
 
-## Citas
+## 6. Desarrollo asistido por IA — cómo se usó (transparencia)
 
-### Qué es
+Este proyecto se construyó y evoluciona con **asistencia de agentes de código (Cursor)** bajo dirección humana. Eso no reemplaza criterio de producto; lo acelera cuando hay disciplina:
 
-La agenda de citas médicas y similares: con quién, dónde, cuándo, motivo, acompañante y si se cumplió.
+| Práctica | Evidencia en el repo |
+|----------|----------------------|
+| Decisiones de dominio **antes** de codear | Almuerzo: fila aislada, sello, máx. 2, opción A de gráficos |
+| Pruebas unitarias del núcleo | `lib/**/*.test.ts` (Vitest) |
+| Migraciones SQL versionadas localmente | `supabase/migrations/` (aplicar en el proyecto remoto) |
+| Registros de trabajo fechados | `docs/YYYY-MM-DD_HHMM_registro-trabajo.md` |
+| Entrega incremental trazable | Commits `Nc` + push a GitHub |
+| Límites explícitos | MCP sin permiso DDL → migraciones manuales documentadas |
 
-### Qué puedes hacer
-
-- **Registrar** una cita nueva (fecha, hora, profesional, lugar, etc.).
-- Ver el listado **ordenado por fecha y hora**: primero lo pendiente (de lo más cercano a lo más lejano); el historial queda ordenado en el tiempo.
-- Cambiar el **estado** (programada, asistió, se perdió, cancelada).
-- **Corregir** una cita ya anotada (por ejemplo un nombre mal escrito) y guardar; la edición se mantiene abierta hasta Guardar o Cancelar.
-- **Quitar** una cita si corresponde.
-
-### Para qué sirve
-
-Nadie depende de un mensaje perdido: la próxima cita y las pasadas quedan en un solo lugar.
+**Qué evaluar en una revisión humana+IA:** claridad del dominio, coherencia UI/API/BD, tests del comportamiento crítico, y honestidad sobre lo pendiente (p. ej. aplicar SQL en Supabase).
 
 ---
 
-## Gastos
+## 7. Cómo abrir y verificar
 
-### Qué es
-
-El cuaderno de gastos del cuidado: medicamentos, citas, terapias, comida, cuentas de servicios, cuidados u otros.
-
-### Qué puedes hacer
-
-- Anotar:
-  - **Fecha** (también puede ser futura si ya sabes el gasto).
-  - **Pago:** pagado, pendiente, pagándose (cuotas) o cubierto.
-  - **Tipo:** categoría del gasto (medicamentos, cita médica, terapia, etc.).
-  - **Detalle:** texto libre (“qué se compró o pagó”), para no perder trazabilidad.
-  - **Comprador:** quién de los cuidadores pagó o quedó a cargo del gasto.
-  - **Monto** en pesos chilenos (sin decimales).
-  - Si está **pagándose:** número de cuotas y fecha de la última cuota.
-- **Corregir** un gasto ya guardado.
-- **Quitar** un gasto.
-- Ver los gastos agrupados (pendientes, en cuotas, pagados, cubiertos, etc.).
-
-### Para qué sirve
-
-Saber cuánto se ha gastado, qué sigue debiendo la familia y quién aportó dinero —base también del aporte equivalente en el Dashboard.
+1. `Start.cmd` (o `npm run dev` con env local).  
+2. Sesión con cuenta miembro de la ficha.  
+3. Smoke checklist sugerido:
+   - Marcar una toma; anotar presión; crear/editar cita.  
+   - Anotar gasto con tipo + detalle.  
+   - Pintar horas; asignar fila Alm; Guardar.  
+   - Como cuidador, comprobar que **no** puedes borrar horas ajenas.  
+   - Dashboard 7/30/90: gráficos alineados; aporte con tres componentes.  
+4. Tests: `npm test`.
 
 ---
 
-## Dashboard
+## 8. Qué no es TereCARE
 
-### Qué es
-
-La vista de conjunto de un período (por ejemplo 7, 30 o 90 días). No reemplaza las secciones de detalle: las resume.
-
-### Qué puedes ver (según datos disponibles)
-
-- **Medicamentos:** cómo van las tomas en el rango.
-- **Presión:** evolución de las mediciones.
-- **Horas con cuidador:** cobertura día a día y por persona.
-- **Citas por estado.**
-- **Gastos acumulados por cuidador:** líneas en el tiempo; cada línea es un comprador/cuidador y el valor **se va sumando** (acumulado). Entran los tipos de gasto anotados.
-- **Aporte total equivalente:** une en un solo indicador en pesos:
-  - el **dinero** anotado en Gastos, y
-  - el **tiempo** de cuidado presencial (horas de la grilla), convertido a pesos.
-- **Gastos por tipo y comprador:** desglose.
-- **Registro:** listado unificado del período (tomas, presión, citas, gastos), con filtros.
-
-### Aporte de tiempo valorizado
-
-- Cada hora de cuidado en el horario se valoriza con una **tarifa por hora** (por defecto **$3.500 CLP/h**, referencia tipo TENS).
-- En el gráfico de aporte equivalente puedes **reajustar la tarifa** si la familia acuerda otro valor.
-- **Importante:** el reajuste **no cambia las horas ya anotadas**. Solo las horas que se marquen **después** del cambio usan la tarifa nueva. Así el historial contable no se reescribe.
-
-### Para qué sirve
-
-Responder en una pantalla: “¿cómo vamos este mes en salud, en turnos y en plata?” y “¿cómo se reparte el esfuerzo entre nosotros?”.
+- No sustituye indicación médica ni urgencias.  
+- No es ERP/facturación formal: montos y tarifas son **acuerdos familiares** para transparentar aportes.  
+- No es un producto “genérico multi-tenant SaaS” aún: el foco es la ficha real de cuidado con roles familiares.
 
 ---
 
-## Cuidadores y horario de cuidado
-
-### Personas
-
-- Ver quién forma parte del cuidado.
-- Preparar o corregir **nombre, correo y teléfono** (también de alguien invitado que aún no tiene cuenta).
-- Invitar a sumarse a la ficha cuando corresponda.
-
-### Horario (quién cuida cada hora)
-
-- Marcar en la grilla **quién está a cargo** en cada hora del día.
-- Planificar con horizonte amplio (**hasta 90 días** hacia adelante, según las reglas de la ficha).
-- Ver totales de horas por persona y el avance de lo ya cumplido.
-
-### Para qué sirve
-
-Organizar turnos sin ambigüedad (“el sábado de 8 a 20 está X”) y alimentar el cálculo de horas del Dashboard.
-
----
-
-## Acceso
-
-### Qué es
-
-El control de **quién entra a la ficha** y con qué rol.
-
-### Qué puedes hacer (si eres responsable)
-
-- Invitar o vincular cuentas.
-- Definir si alguien **modifica** o solo **consulta**.
-- Revisar el directorio de fichas cuando administras más de una.
-
-### Para qué sirve
-
-Que la información sensible del cuidado solo la vean quienes deben, y que no cualquiera pueda borrar o cambiar registros.
-
----
-
-## Roles en pocas palabras
-
-| Rol | Puede mirar | Puede anotar / corregir | Administra acceso |
-|-----|-------------|-------------------------|-------------------|
-| Responsable | Sí | Sí | Sí |
-| Cuidador | Sí | Sí (en lo operativo de la ficha) | No (salvo lo que la ficha permita) |
-| Consulta | Sí | No | No |
-
-Si un botón no aparece o está deshabilitado, casi seguro es por el rol de tu cuenta.
-
----
-
-## Buenas prácticas de uso diario
-
-1. **Marca las tomas** en el momento o al cerrar el turno.
-2. **Anota la presión** cuando se mida; no dejes el número solo en el celular.
-3. **Agenda las citas** en cuanto se agenden; corrige faltas de ortografía con Corregir.
-4. **Registra cada gasto** con tipo y detalle; si alguien pagó, elige el comprador correcto.
-5. **Pinta el horario** con quien realmente cuidó o cuidará; de ahí salen las horas valorizadas.
-6. Mira el **Dashboard** al cerrar la semana o el mes para cuadrar aportes.
-
-Nada de lo importante del cuidado debería “pasar sin anotarse”: la ficha es la memoria compartida.
-
----
-
-## Qué no es TereCARE
-
-- No reemplaza la indicación médica ni la receta.
-- No es un banco ni un sistema de facturación formal: los montos y la tarifa horaria son **acuerdos de la familia** para transparentar aportes.
-- No sustituye la urgencia: ante una emergencia, llama a los servicios de salud correspondientes.
-
----
-
-## Problemas frecuentes
+## 9. Problemas frecuentes
 
 | Situación | Qué revisar |
 |-----------|-------------|
-| No veo una sección o está vacía | Permisos de rol; o falta aplicar un cambio en la base de datos (pedir al responsable técnico). |
-| No puedo editar | Tu rol es solo consulta; o hay que pulsar **Corregir** / **Guardar**. |
-| El Dashboard no muestra gastos u horas | Aún no hay datos en el rango elegido; prueba 30 o 90 días. |
-| Cambié la tarifa y “no cambió el pasado” | Es correcto: el historial de horas ya selladas no se altera. |
-| No abre la app en el PC | Usa `Start.cmd` y comprueba que hay sesión iniciada. |
+| Sección vacía o 503 de “falta migración” | SQL pendiente en Supabase (`care_lunches`, tarifas, teléfono, etc.) |
+| Cuidador no puede editar | Debe estar vinculado a una persona de cuidado; solo edita lo propio |
+| Cambié tarifa y el pasado “no cambió” | Correcto: sello histórico |
+| Almuerzo “rompe” el `/24` | No debería: la fila Alm está aislada; si pasa, es bug a reportar |
+| Gráfico de aporte enorme | En `4c` se unificó el tamaño; haz pull |
 
 ---
 
-## Resumen en una frase
+## 10. Resumen
 
-**TereCARE concentra el día a día del cuidado de Teresa —medicamentos, presión, citas, gastos y turnos— y muestra de forma clara cómo se reparte el esfuerzo en tiempo y en dinero.**
+**TereCARE es una ficha operativa de cuidado domiciliario con trazabilidad clínica ligera, turnos (incl. almuerzo valorizado), gastos y un aporte equivalente auditable — construida con Next.js/Supabase, dominio testeado, permisos por rol y entrega versionada, incluyendo trabajo asistido por IA bajo control humano.**
+
+---
+
+### Referencias de registro
+
+- `docs/2026-11-03_2322_registro-trabajo.md` — gastos, citas, aporte horas, horizonte 90 días  
+- `docs/2026-11-05_2236_registro-trabajo.md` — almuerzos, Dashboard, permisos cuidador vs dueño, commit `4c`
