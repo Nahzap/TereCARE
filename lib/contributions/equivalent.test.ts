@@ -62,16 +62,49 @@ describe('care contribution equivalent', () => {
 
     expect(stats.moneyAmount).toBe(10000)
     expect(stats.timeAmount).toBe(3500 + 3500 + 4000 + 3500)
+    expect(stats.lunchAmount).toBe(0)
     expect(stats.hours).toBe(4)
     expect(stats.equivalentAmount).toBe(10000 + 14500)
-    expect(stats.lines.map((line) => ({ label: line.label, money: line.money, timeValue: line.timeValue, total: line.total }))).toEqual([
-      { label: 'Pilar', money: 10000, timeValue: 3500, total: 13500 },
-      { label: 'Ana', money: 0, timeValue: 11000, total: 11000 },
+    expect(
+      stats.lines.map((line) => ({
+        label: line.label,
+        money: line.money,
+        timeValue: line.timeValue,
+        lunchValue: line.lunchValue,
+        total: line.total,
+      })),
+    ).toEqual([
+      { label: 'Pilar', money: 10000, timeValue: 3500, lunchValue: 0, total: 13500 },
+      { label: 'Ana', money: 0, timeValue: 11000, lunchValue: 0, total: 11000 },
     ])
 
     const last = stats.cumulativeDays.at(-1)
     expect(last?.total).toBe(24500)
     expect(last?.amounts.ana).toBe(11000)
     expect(last?.amounts.pilar).toBe(13500)
+  })
+
+  it('adds stamped lunch days to the equivalent contribution', () => {
+    const stats = contributionStats({
+      from: '2026-11-01',
+      to: '2026-11-02',
+      today: '2026-11-02',
+      rates: [{ id: '1', rateClp: 3500, effectiveFrom: '2026-01-01' }],
+      expenses: [],
+      hours: [],
+      lunches: [
+        { personId: 'ana', caregiverName: 'Ana', lunchOn: '2026-11-01', rateClp: 9000 },
+        { personId: 'pilar', caregiverName: 'Pilar', lunchOn: '2026-11-01', rateClp: 9000 },
+        { personId: 'ana', caregiverName: 'Ana', lunchOn: '2026-11-02', rateClp: 9500 },
+      ],
+    })
+
+    expect(stats.lunchAmount).toBe(9000 + 9000 + 9500)
+    expect(stats.lunchDays).toBe(3)
+    expect(stats.equivalentAmount).toBe(27500)
+    expect(stats.lines.map((line) => ({ label: line.label, lunchValue: line.lunchValue, lunchDays: line.lunchDays }))).toEqual([
+      { label: 'Ana', lunchValue: 18500, lunchDays: 2 },
+      { label: 'Pilar', lunchValue: 9000, lunchDays: 1 },
+    ])
   })
 })

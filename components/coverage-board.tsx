@@ -16,6 +16,7 @@ import { Toast, useToast } from '@/components/use-toast'
 import { addDays, MONTHS, shortDate } from '@/lib/schedule/dates'
 import {
   applyChanges,
+  canEditCarePerson,
   caregiverColor,
   clampWindowStart,
   COVERAGE_FUTURE_DAYS,
@@ -52,6 +53,14 @@ import {
   type HourSlot,
   type TotalScope,
 } from '@/lib/coverage/schedule'
+import {
+  applyLunchChanges,
+  LUNCH_PEOPLE_MAX,
+  lunchBrushChanges,
+  lunchDiff,
+  type LunchBrush,
+  type LunchSlot,
+} from '@/lib/lunch/lunch'
 
 type Painter = {
   personId: string
@@ -66,11 +75,21 @@ type Gesture = CoverageBrush & {
   end: HourSlot
 }
 
+type LunchGesture = LunchBrush & {
+  start: string
+  end: string
+}
+
 const ERASER = 'eraser'
+const LUNCH_AFTER_HOUR = 13
 
 type HoverCell = {
   coveredOn: string
   hour: number
+}
+
+type HoverLunch = {
+  lunchOn: string
 }
 
 const HOURS = Array.from({ length: HOURS_IN_DAY }, (_, hour) => hour)
@@ -130,22 +149,31 @@ export function CoverageBoard({
   const [totalsError, setTotalsError] = useState<string | null>(null)
   const [revision, setRevision] = useState(0)
   const [savedSlots, setSavedSlots] = useState<CoverageSlot[] | null>(null)
+  const [savedLunches, setSavedLunches] = useState<LunchSlot[] | null>(null)
   const [situation, setSituation] = useState<CareSituation | null>(null)
 
   const [gesture, setGesture] = useState<Gesture | null>(null)
+  const [lunchGesture, setLunchGesture] = useState<LunchGesture | null>(null)
+  const [hoverLunch, setHoverLunch] = useState<HoverLunch | null>(null)
 
   const gestureRef = useRef<Gesture | null>(null)
+  const lunchGestureRef = useRef<LunchGesture | null>(null)
   const slotsRef = useRef<CoverageSlot[]>([])
+  const lunchesRef = useRef<LunchSlot[]>([])
   const savedRef = useRef<CoverageSlot[]>([])
+  const savedLunchesRef = useRef<LunchSlot[]>([])
   const dirtyRef = useRef(false)
   const dataRef = useRef<CoveragePayload | null>(null)
   const savingRef = useRef(false)
   const commitRef = useRef<(done: Gesture) => void>(() => {})
+  const commitLunchRef = useRef<(done: LunchGesture) => void>(() => {})
   const editorRef = useRef({
     canEdit: false,
     personId: null as string | null,
     erasing: false,
     assignable: new Set<string>(),
+    selfOnly: false,
+    myPersonId: null as string | null,
   })
   const dragRef = useRef<number | null>(null)
   const slideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -175,15 +203,19 @@ export function CoverageBoard({
       .then((payload) => {
         if (cancelled) return
         setError(null)
+        const lunches = payload.lunches ?? []
         if (dirtyRef.current && dataRef.current?.from === payload.from) {
-          setData({ ...payload, slots: slotsRef.current })
+          setData({ ...payload, slots: slotsRef.current, lunches: lunchesRef.current })
           return
         }
         savedRef.current = payload.slots
         slotsRef.current = payload.slots
+        savedLunchesRef.current = lunches
+        lunchesRef.current = lunches
         dirtyRef.current = false
         setSavedSlots(payload.slots)
-        setData(payload)
+        setSavedLunches(lunches)
+        setData({ ...payload, lunches })
       })
       .catch((reason: unknown) => {
         if (!cancelled) setError(errorText(reason) ?? 'No se pudo cargar el horario')
@@ -230,10 +262,12 @@ export function CoverageBoard({
   }, [patientId, careRevision])
 
   const namedSlots = useMemo(() => data?.slots ?? [], [data])
+  const namedLunches = useMemo(() => data?.lunches ?? [], [data])
 
   const painters = useMemo(() => {
     const people = data?.people ?? []
     const withHours = new Set(namedSlots.map((slot) => slot.personId))
+    const withLunch = new Set(namedLunches.map((slot) => slot.personId))
     return people
       .map((person, index) => ({
         personId: person.id,
@@ -242,8 +276,8 @@ export function CoverageBoard({
         assignable: person.assignable,
         color: caregiverColor(index),
       }))
-      .filter((painter) => painter.assignable || withHours.has(painter.personId))
-  }, [data, namedSlots])
+      .filter((painter) => painter.assignable || withHours.has(painter.personId) || withLunch.has(painter.personId))
+  }, [data, namedSlots, namedLunches])
 
   const byCell = useMemo(() => {
     const map = new Map<string, CoverageSlot[]>()
@@ -256,18 +290,35 @@ export function CoverageBoard({
     return map
   }, [namedSlots])
 
+  const byLunchDay = useMemo(() => {
+    const map = new Map<string, LunchSlot[]>()
+    for (const slot of namedLunches) {
+      const list = map.get(slot.lunchOn) ?? []
+      list.push(slot)
+      map.set(slot.lunchOn, list)
+    }
+    return map
+  }, [namedLunches])
+
   const canEdit = data?.role === 'owner' || data?.role === 'caregiver'
+  const selfOnly = data?.role === 'caregiver'
+  const myPersonId =
+    painters.find((painter) => painter.userId != null && painter.userId === meId)?.personId ?? null
   const erasing = selectedId === ERASER
-  const activeId = erasing
-    ? null
-    : selectedId && painters.some((painter) => painter.personId === selectedId)
+  const preferredId = selfOnly
+    ? myPersonId
+    : selectedId && selectedId !== ERASER && painters.some((painter) => painter.personId === selectedId)
       ? selectedId
       : (painters.find((painter) => painter.assignable && painter.userId === meId)?.personId ??
         painters.find((painter) => painter.assignable)?.personId ??
         null)
-  const selected = painters.find((painter) => painter.personId === activeId) ?? null
+  const activeId = erasing ? (selfOnly ? myPersonId : null) : preferredId
+  const selected = painters.find((painter) => painter.personId === preferredId) ?? null
+  const canPaintSelf = !selfOnly || myPersonId != null
   const chipNames = shortNames(painters.map((painter) => painter.name))
-  const dirty = savedSlots != null && coverageDiff(savedSlots, namedSlots).length > 0
+  const dirty =
+    (savedSlots != null && coverageDiff(savedSlots, namedSlots).length > 0) ||
+    (savedLunches != null && lunchDiff(savedLunches, namedLunches).length > 0)
   const homeDays = (data?.days ?? []).filter((day) => dayCare(situation, day) === 'home')
   const totalHours = homeDays.length * HOURS_IN_DAY
   const covered = coveredHourCount(namedSlots, homeDays)
@@ -278,16 +329,35 @@ export function CoverageBoard({
   }, [data?.days, situation])
   const rect = gesture ? rectBetween(gesture.start, gesture.end) : null
   const rectSize = rect && data ? slotsInRect(data.days, rect).length : 0
+  const lunchSpan = lunchGesture
+    ? {
+        from: lunchGesture.start <= lunchGesture.end ? lunchGesture.start : lunchGesture.end,
+        to: lunchGesture.start <= lunchGesture.end ? lunchGesture.end : lunchGesture.start,
+      }
+    : null
+  const lunchSpanDays =
+    lunchSpan && data ? data.days.filter((day) => day >= lunchSpan.from && day <= lunchSpan.to) : []
 
   useEffect(() => {
     dataRef.current = data
     slotsRef.current = data?.slots ?? []
+    lunchesRef.current = data?.lunches ?? []
     dirtyRef.current = dirty
     editorRef.current = {
-      canEdit,
-      personId: activeId,
+      canEdit: canEdit && canPaintSelf,
+      personId: preferredId,
       erasing,
-      assignable: new Set(painters.filter((painter) => painter.assignable).map((painter) => painter.personId)),
+      assignable: new Set(
+        painters
+          .filter((painter) => {
+            if (!painter.assignable) return false
+            if (!selfOnly || meId == null) return true
+            return canEditCarePerson('caregiver', meId, painter)
+          })
+          .map((painter) => painter.personId),
+      ),
+      selfOnly,
+      myPersonId,
     }
 
     commitRef.current = (done) => {
@@ -298,9 +368,31 @@ export function CoverageBoard({
       const names = new Map(painters.map((painter) => [painter.personId, painter.name]))
       const next = applyChanges(slotsRef.current, changes, names)
       slotsRef.current = next
-      dirtyRef.current = coverageDiff(savedRef.current, next).length > 0
+      dirtyRef.current =
+        coverageDiff(savedRef.current, next).length > 0 ||
+        lunchDiff(savedLunchesRef.current, lunchesRef.current).length > 0
       setError(null)
       setData((current) => (current ? { ...current, slots: next } : current))
+    }
+
+    commitLunchRef.current = (done) => {
+      if (!data || savingRef.current) return
+      const from = done.start <= done.end ? done.start : done.end
+      const to = done.start <= done.end ? done.end : done.start
+      const days = data.days.filter((day) => day >= from && day <= to)
+      const { changes, skippedFull } = lunchBrushChanges(lunchesRef.current, days, done)
+      if (skippedFull) {
+        showToast(`Como máximo ${LUNCH_PEOPLE_MAX} personas a cargo del almuerzo ese día`)
+      }
+      if (changes.length === 0) return
+      const names = new Map(painters.map((painter) => [painter.personId, painter.name]))
+      const next = applyLunchChanges(lunchesRef.current, changes, names)
+      lunchesRef.current = next
+      dirtyRef.current =
+        coverageDiff(savedRef.current, slotsRef.current).length > 0 ||
+        lunchDiff(savedLunchesRef.current, next).length > 0
+      setError(null)
+      setData((current) => (current ? { ...current, lunches: next } : current))
     }
   })
 
@@ -329,13 +421,25 @@ export function CoverageBoard({
 
   useEffect(() => {
     function onMove(event: PointerEvent) {
-      const current = gestureRef.current
-      if (!current) return
       if (event.buttons === 0) {
         onUp()
         return
       }
       const target = document.elementFromPoint(event.clientX, event.clientY)
+      const lunchCurrent = lunchGestureRef.current
+      if (lunchCurrent) {
+        const lunchCell = target instanceof Element ? target.closest('[data-lunch-cell]') : null
+        if (!(lunchCell instanceof HTMLElement)) return
+        const lunchOn = lunchCell.dataset.date
+        if (!lunchOn || lunchCurrent.end === lunchOn) return
+        const next = { ...lunchCurrent, end: lunchOn }
+        lunchGestureRef.current = next
+        setLunchGesture(next)
+        setHoverLunch({ lunchOn })
+        return
+      }
+      const current = gestureRef.current
+      if (!current) return
       const cell = target instanceof Element ? target.closest('[data-coverage-cell]') : null
       if (!(cell instanceof HTMLElement)) return
       const coveredOn = cell.dataset.date
@@ -349,6 +453,13 @@ export function CoverageBoard({
     }
 
     function onUp() {
+      const lunchDone = lunchGestureRef.current
+      if (lunchDone) {
+        lunchGestureRef.current = null
+        setLunchGesture(null)
+        commitLunchRef.current(lunchDone)
+        return
+      }
       const done = gestureRef.current
       if (!done) return
       gestureRef.current = null
@@ -369,6 +480,12 @@ export function CoverageBoard({
   }, [])
 
   function startGesture(cell: HourSlot): Gesture | null {
+    const previousLunch = lunchGestureRef.current
+    if (previousLunch) {
+      lunchGestureRef.current = null
+      setLunchGesture(null)
+      commitLunchRef.current(previousLunch)
+    }
     const previous = gestureRef.current
     if (previous) {
       gestureRef.current = null
@@ -376,12 +493,21 @@ export function CoverageBoard({
     }
     const editor = editorRef.current
     if (!editor.canEdit || savingRef.current) return null
-    if (editor.erasing) return { personId: null, mode: 'erase', start: cell, end: cell }
-    if (!editor.personId) {
-      showToast('Elige un cuidador')
+    if (editor.erasing) {
+      if (editor.selfOnly) {
+        if (!editor.myPersonId) {
+          showToast('Tu cuenta no está vinculada a una persona de cuidado')
+          return null
+        }
+        return { personId: editor.myPersonId, mode: 'erase', start: cell, end: cell }
+      }
+      return { personId: null, mode: 'erase', start: cell, end: cell }
+    }
+    const personId = editor.selfOnly ? editor.myPersonId : editor.personId
+    if (!personId) {
+      showToast(editor.selfOnly ? 'Tu cuenta no está vinculada a una persona de cuidado' : 'Elige un cuidador')
       return null
     }
-    const personId = editor.personId
     const holds = slotsRef.current.some(
       (slot) => slot.personId === personId && slot.coveredOn === cell.coveredOn && slot.hour === cell.hour,
     )
@@ -390,6 +516,43 @@ export function CoverageBoard({
       return null
     }
     return { personId, mode: holds ? 'erase' : 'paint', start: cell, end: cell }
+  }
+
+  function startLunchGesture(lunchOn: string): LunchGesture | null {
+    const previous = gestureRef.current
+    if (previous) {
+      gestureRef.current = null
+      setGesture(null)
+      commitRef.current(previous)
+    }
+    const previousLunch = lunchGestureRef.current
+    if (previousLunch) {
+      lunchGestureRef.current = null
+      commitLunchRef.current(previousLunch)
+    }
+    const editor = editorRef.current
+    if (!editor.canEdit || savingRef.current) return null
+    if (editor.erasing) {
+      if (editor.selfOnly) {
+        if (!editor.myPersonId) {
+          showToast('Tu cuenta no está vinculada a una persona de cuidado')
+          return null
+        }
+        return { personId: editor.myPersonId, mode: 'erase', start: lunchOn, end: lunchOn }
+      }
+      return { personId: null, mode: 'erase', start: lunchOn, end: lunchOn }
+    }
+    const personId = editor.selfOnly ? editor.myPersonId : editor.personId
+    if (!personId) {
+      showToast(editor.selfOnly ? 'Tu cuenta no está vinculada a una persona de cuidado' : 'Elige un cuidador')
+      return null
+    }
+    const holds = lunchesRef.current.some((slot) => slot.personId === personId && slot.lunchOn === lunchOn)
+    if (!holds && !editor.assignable.has(personId)) {
+      showToast('Esa persona ya no es cuidadora. Solo puedes quitar su almuerzo.')
+      return null
+    }
+    return { personId, mode: holds ? 'erase' : 'paint', start: lunchOn, end: lunchOn }
   }
 
   function cellOf(element: HTMLElement): HourSlot | null {
@@ -408,6 +571,16 @@ export function CoverageBoard({
     setGesture(next)
   }
 
+  function onLunchPointerDown(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0) return
+    event.preventDefault()
+    const lunchOn = event.currentTarget.dataset.date
+    if (!lunchOn) return
+    const next = startLunchGesture(lunchOn)
+    lunchGestureRef.current = next
+    setLunchGesture(next)
+  }
+
   function onKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
     if (event.key !== 'Enter' && event.key !== ' ') return
     event.preventDefault()
@@ -417,26 +590,53 @@ export function CoverageBoard({
     if (next) commitRef.current(next)
   }
 
+  function onLunchKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    const lunchOn = event.currentTarget.dataset.date
+    if (!lunchOn) return
+    const next = startLunchGesture(lunchOn)
+    if (next) commitLunchRef.current(next)
+  }
+
   const hoverPeople = hover ? (byCell.get(`${hover.coveredOn}|${hover.hour}`) ?? []) : []
+  const hoverLunchPeople = hoverLunch ? (byLunchDay.get(hoverLunch.lunchOn) ?? []) : []
   const gestureName = gesture?.personId
     ? (painters.find((painter) => painter.personId === gesture.personId)?.name ?? 'Cuidador')
-    : null
+    : lunchGesture?.personId
+      ? (painters.find((painter) => painter.personId === lunchGesture.personId)?.name ?? 'Cuidador')
+      : null
   const hoursText = rectSize === 1 ? '1 hora' : `${rectSize} horas`
-  const status = gesture
+  const lunchDaysText = lunchSpanDays.length === 1 ? '1 día de almuerzo' : `${lunchSpanDays.length} días de almuerzo`
+  const status = lunchGesture
     ? gestureName == null
-      ? `Suelta para dejar sin nadie ${hoursText}. Después confirma con Guardar.`
-      : gesture.mode === 'paint'
-        ? `Suelta para sumar a ${gestureName} en ${hoursText}. Quien ya esté se queda. Después confirma con Guardar.`
-        : `Suelta para quitar a ${gestureName} de ${hoursText}. Los demás se quedan. Después confirma con Guardar.`
-    : hover
-      ? cellLabel(hover.coveredOn, hover.hour, hoverPeople.map((slot) => slot.caregiverName))
-      : canEdit
-        ? erasing
-          ? 'Borrar: haz clic o arrastra un rectángulo para dejar esas horas sin nadie. Confirma con Guardar.'
-          : selected
-            ? `Estás asignando a ${selected.name}. Haz clic o arrastra un rectángulo de días y horas. Si empiezas sobre una hora de ${selected.name}, el rectángulo la quita. Confirma con Guardar.`
-            : 'Elige un cuidador y arrastra un rectángulo sobre las horas en que estará a cargo. Confirma con Guardar.'
-        : 'Puedes ver quién estuvo o estará a cargo. Solo un dueño o cuidador puede marcar horas.'
+      ? `Suelta para dejar sin nadie ${lunchDaysText}. Después confirma con Guardar.`
+      : lunchGesture.mode === 'paint'
+        ? `Suelta para dejar a ${gestureName} a cargo de ${lunchDaysText}. Máximo ${LUNCH_PEOPLE_MAX} personas por día. Después confirma con Guardar.`
+        : `Suelta para quitar a ${gestureName} de ${lunchDaysText}. Después confirma con Guardar.`
+    : gesture
+      ? gestureName == null
+        ? `Suelta para dejar sin nadie ${hoursText}. Después confirma con Guardar.`
+        : gesture.mode === 'paint'
+          ? `Suelta para sumar a ${gestureName} en ${hoursText}. Quien ya esté se queda. Después confirma con Guardar.`
+          : `Suelta para quitar a ${gestureName} de ${hoursText}. Los demás se quedan. Después confirma con Guardar.`
+      : hover
+        ? cellLabel(hover.coveredOn, hover.hour, hoverPeople.map((slot) => slot.caregiverName))
+        : hoverLunch
+          ? `${weekdayTitle(hoverLunch.lunchOn)} ${shortDate(hoverLunch.lunchOn)}, almuerzo. ${joinNames(hoverLunchPeople.map((slot) => slot.caregiverName))}.`
+          : canEdit
+            ? !canPaintSelf
+              ? 'Tu cuenta no está vinculada a una persona de cuidado, así que no puedes marcar horario todavía.'
+              : erasing
+                ? selfOnly
+                  ? 'Borrar: quitas solo tus propias horas o almuerzos. Confirma con Guardar.'
+                  : 'Borrar: haz clic o arrastra sobre horas o sobre la fila amarilla de almuerzo. Confirma con Guardar.'
+                : selected
+                  ? selfOnly
+                    ? `Estás marcando tu horario (${selected.name}). Arrastra horas o la fila amarilla de almuerzo. Confirma con Guardar.`
+                    : `Estás asignando a ${selected.name}. Arrastra horas o la fila amarilla de almuerzo (máx. ${LUNCH_PEOPLE_MAX} por día). Confirma con Guardar.`
+                  : 'Elige un cuidador y marca horas o la fila amarilla de almuerzo. Confirma con Guardar.'
+            : 'Puedes ver quién estuvo o estará a cargo. Solo un dueño o cuidador puede marcar horas y almuerzos.'
 
   const bounds = data ? historyBounds(data.today) : null
   const viewYear = data ? Number(data.from.slice(0, 4)) : null
@@ -493,7 +693,8 @@ export function CoverageBoard({
     const current = dataRef.current
     if (!current || savingRef.current) return
     const changes = coverageDiff(savedRef.current, slotsRef.current)
-    if (changes.length === 0) return
+    const lunchChanges = lunchDiff(savedLunchesRef.current, lunchesRef.current)
+    if (changes.length === 0 && lunchChanges.length === 0) return
     savingRef.current = true
     setSaving(true)
     setError(null)
@@ -505,12 +706,35 @@ export function CoverageBoard({
           body: JSON.stringify(change),
         })
       }
-      if (!next) return
-      savedRef.current = next.slots
-      slotsRef.current = next.slots
+      let lunches = lunchesRef.current
+      for (const change of lunchChanges) {
+        const saved = await api<{ lunches: LunchSlot[] }>(
+          `/api/patients/${patientId}/lunches?from=${current.from}`,
+          {
+            method: 'PUT',
+            body: JSON.stringify(change),
+          },
+        )
+        lunches = saved.lunches
+      }
+      if (next) {
+        savedRef.current = next.slots
+        slotsRef.current = next.slots
+        setSavedSlots(next.slots)
+      }
+      savedLunchesRef.current = lunches
+      lunchesRef.current = lunches
+      setSavedLunches(lunches)
       dirtyRef.current = false
-      setSavedSlots(next.slots)
-      setData(next)
+      setData((currentData) =>
+        currentData
+          ? {
+              ...(next ?? currentData),
+              slots: next?.slots ?? currentData.slots,
+              lunches,
+            }
+          : currentData,
+      )
       setRevision((value) => value + 1)
     } catch (reason: unknown) {
       setError(errorText(reason) ?? 'No se pudo guardar el horario')
@@ -523,10 +747,12 @@ export function CoverageBoard({
   function discardEdits() {
     if (savingRef.current) return
     const saved = savedRef.current
+    const lunches = savedLunchesRef.current
     slotsRef.current = saved
+    lunchesRef.current = lunches
     dirtyRef.current = false
     setError(null)
-    setData((current) => (current ? { ...current, slots: saved } : current))
+    setData((current) => (current ? { ...current, slots: saved, lunches } : current))
   }
 
   return (
@@ -539,10 +765,12 @@ export function CoverageBoard({
             </h2>
             {data ? (
               <p className="mt-1 max-w-3xl text-sm text-slate-600">
-                Cada casilla es una hora, hora de Chile. La grilla muestra el tramo reciente y toda la proyección
-                de planificación, hasta {COVERAGE_FUTURE_DAYS} días después de hoy. Elige a una persona y arrastra
-                un rectángulo de días y horas. Una hora puede tener a varias personas: cada una se ve como una
-                franja del mismo ancho. Con «Borrar» dejas horas sin nadie. Pulsa Guardar para confirmar.
+                Cada casilla es una hora, hora de Chile. Entre las 13 y las 14 hay una fila amarilla de almuerzo
+                (no cuenta como cobertura horaria; máximo {LUNCH_PEOPLE_MAX} personas por día).
+                {selfOnly
+                  ? ' Como cuidador/a solo puedes marcar o quitar tu propio horario; el resto se ve, pero no se edita.'
+                  : ' Como dueño/a puedes asignar a cualquiera. Arrastra días u horas; una hora puede tener a varias personas. Con «Borrar» dejas casillas sin nadie.'}{' '}
+                Pulsa Guardar para confirmar.
               </p>
             ) : (
               <p className="mt-1 max-w-3xl text-sm text-slate-600">
@@ -666,7 +894,7 @@ export function CoverageBoard({
             ) : (
               <div className="mt-4 flex flex-wrap gap-2" role="group" aria-label="Cuidadores del horario">
                 {painters.map((painter, index) => {
-                  const active = painter.personId === activeId
+                  const active = !erasing && painter.personId === preferredId
                   const label = chipNames[index] ?? painter.name
                   const className =
                     'inline-flex max-w-full items-center gap-2 rounded-full px-3 py-1.5 text-sm font-bold ring-1 ring-transparent'
@@ -689,7 +917,11 @@ export function CoverageBoard({
                       )}
                     </>
                   )
-                  if (!canEdit) {
+                  const selectable =
+                    canEdit &&
+                    canPaintSelf &&
+                    (!selfOnly || (meId != null && canEditCarePerson('caregiver', meId, painter)))
+                  if (!selectable) {
                     return (
                       <span key={painter.personId} className={className} style={style} title={painter.name}>
                         {body}
@@ -704,7 +936,7 @@ export function CoverageBoard({
                     <button
                       key={painter.personId}
                       type="button"
-                      aria-pressed={active}
+                      aria-pressed={active && !erasing}
                       aria-label={spoken}
                       title={painter.name}
                       onClick={() => setSelectedId(painter.personId)}
@@ -715,7 +947,7 @@ export function CoverageBoard({
                     </button>
                   )
                 })}
-                {canEdit ? (
+                {canEdit && canPaintSelf ? (
                   <button
                     type="button"
                     aria-pressed={erasing}
@@ -851,7 +1083,7 @@ export function CoverageBoard({
                     </div>
                   )
                 })}
-                {HOURS.map((hour) => (
+                {HOURS.flatMap((hour) => [
                   <HourRow
                     key={hour}
                     hour={hour}
@@ -864,10 +1096,34 @@ export function CoverageBoard({
                     rect={rect}
                     canEdit={canEdit}
                     onPointerDown={onPointerDown}
-                    onPointerEnter={(coveredOn, enteredHour) => setHover({ coveredOn, hour: enteredHour })}
+                    onPointerEnter={(coveredOn, enteredHour) => {
+                      setHoverLunch(null)
+                      setHover({ coveredOn, hour: enteredHour })
+                    }}
                     onKeyDown={onKeyDown}
-                  />
-                ))}
+                  />,
+                  ...(hour === LUNCH_AFTER_HOUR
+                    ? [
+                        <LunchRow
+                          key="lunch"
+                          days={data.days}
+                          today={data.today}
+                          byLunchDay={byLunchDay}
+                          careByDay={careByDay}
+                          painters={painters}
+                          gesture={lunchGesture}
+                          span={lunchSpan}
+                          canEdit={canEdit}
+                          onPointerDown={onLunchPointerDown}
+                          onPointerEnter={(lunchOn) => {
+                            setHover(null)
+                            setHoverLunch({ lunchOn })
+                          }}
+                          onKeyDown={onLunchKeyDown}
+                        />,
+                      ]
+                    : []),
+                ])}
               </div>
               </div>
             </div>
@@ -1056,6 +1312,106 @@ function HoursPanel({
   )
 }
 
+function LunchRow({
+  days,
+  today,
+  byLunchDay,
+  careByDay,
+  painters,
+  gesture,
+  span,
+  canEdit,
+  onPointerDown,
+  onPointerEnter,
+  onKeyDown,
+}: {
+  days: readonly string[]
+  today: string
+  byLunchDay: Map<string, LunchSlot[]>
+  careByDay: Record<string, CareDayKind>
+  painters: readonly Painter[]
+  gesture: LunchGesture | null
+  span: { from: string; to: string } | null
+  canEdit: boolean
+  onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => void
+  onPointerEnter: (lunchOn: string) => void
+  onKeyDown: (event: ReactKeyboardEvent<HTMLButtonElement>) => void
+}) {
+  return (
+    <>
+      <div className="sticky left-0 z-10 flex h-5 items-center justify-end bg-yellow-300 pr-0.5 text-[8px] font-black tracking-wide text-yellow-950 uppercase">
+        Alm
+      </div>
+      {days.map((day) => {
+        const saved = byLunchDay.get(day) ?? []
+        const inside = span != null && day >= span.from && day <= span.to
+        const preview = inside && gesture ? previewLunchSlots(saved, gesture, painters, day) : saved
+        const people = peopleOnCell(
+          preview.map((slot) => ({
+            personId: slot.personId,
+            caregiverName: slot.caregiverName,
+            coveredOn: slot.lunchOn,
+            hour: 0,
+          })),
+          painters,
+        )
+        const names = people.map((person) => person.name)
+        const kind = careByDay[day] ?? 'home'
+        const paused = kind !== 'home'
+        const label =
+          paused && names.length === 0
+            ? `${weekdayTitle(day)} ${shortDate(day)}, almuerzo. ${pausedTitle(kind)}`
+            : `${weekdayTitle(day)} ${shortDate(day)}, almuerzo. ${joinNames(names)}.`
+        const emptyClass = paused
+          ? 'bg-yellow-200'
+          : day < today
+            ? 'bg-yellow-300'
+            : 'bg-yellow-200'
+        const flag = people.length > 0 ? <Flag colors={people.map((person) => person.color)} className="h-full w-full" /> : null
+        const outline = inside ? (
+          <span
+            className={`pointer-events-none absolute inset-0 ring-2 ring-inset ${
+              gesture?.mode === 'paint' ? 'ring-slate-900' : 'ring-red-600'
+            }`}
+          />
+        ) : null
+        if (!canEdit) {
+          return (
+            <div
+              key={`lunch-${day}`}
+              data-lunch-cell=""
+              data-date={day}
+              aria-label={label}
+              onPointerEnter={() => onPointerEnter(day)}
+              className={`h-5 ${people.length === 0 ? emptyClass : 'bg-yellow-50'}`}
+            >
+              {flag}
+            </div>
+          )
+        }
+        return (
+          <button
+            key={`lunch-${day}`}
+            type="button"
+            data-lunch-cell=""
+            data-date={day}
+            aria-label={label}
+            onPointerDown={onPointerDown}
+            onPointerEnter={() => onPointerEnter(day)}
+            onKeyDown={onKeyDown}
+            className={`relative h-5 touch-none p-0 focus-visible:outline-2 focus-visible:outline-slate-900 ${
+              people.length === 0 ? emptyClass : 'bg-yellow-50'
+            }`}
+          >
+            {flag}
+            {outline}
+          </button>
+        )
+      })}
+    </>
+  )
+}
+
 function HourRow({
   hour,
   days,
@@ -1175,6 +1531,21 @@ function previewSlots(
   if (gesture.mode === 'erase') return others
   const caregiverName = painters.find((painter) => painter.personId === personId)?.name ?? 'Cuidador'
   return [...others, { personId, caregiverName, coveredOn, hour }]
+}
+
+function previewLunchSlots(
+  saved: readonly LunchSlot[],
+  gesture: LunchGesture,
+  painters: readonly Painter[],
+  lunchOn: string,
+): LunchSlot[] {
+  if (gesture.personId == null) return []
+  const personId = gesture.personId
+  const others = saved.filter((slot) => slot.personId !== personId)
+  if (gesture.mode === 'erase') return others
+  if (others.length >= LUNCH_PEOPLE_MAX) return [...saved]
+  const caregiverName = painters.find((painter) => painter.personId === personId)?.name ?? 'Cuidador'
+  return [...others, { personId, caregiverName, lunchOn }]
 }
 
 function Flag({ colors, className }: { colors: readonly string[]; className: string }) {

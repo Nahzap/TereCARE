@@ -10,8 +10,10 @@ import { CoverageBoard } from '@/components/coverage-board'
 import { ROLE_LABEL } from '@/components/format'
 import { FieldLabel, fieldClass, Modal } from '@/components/modal'
 import { Toast, useToast } from '@/components/use-toast'
+import { passwordError, PASSWORD_MIN } from '@/lib/auth/password'
 
 type AccessPayload = { members: Member[]; invites: Invite[] }
+type PasswordTarget = { email: string; label: string }
 
 export function CaregiversBoard({ patientId }: { patientId: string }) {
   const router = useRouter()
@@ -25,6 +27,7 @@ export function CaregiversBoard({ patientId }: { patientId: string }) {
   const [invitePhone, setInvitePhone] = useState('')
   const [role, setRole] = useState<'caregiver' | 'viewer'>('caregiver')
   const [editingInvite, setEditingInvite] = useState<Invite | null>(null)
+  const [passwordTarget, setPasswordTarget] = useState<PasswordTarget | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
@@ -229,7 +232,7 @@ export function CaregiversBoard({ patientId }: { patientId: string }) {
             <h2 className="font-black">Cuentas con acceso</h2>
             <p className="mt-1 text-sm text-slate-600">
               {isOwner
-                ? 'Tú administras a quienes ya se registraron: puedes cambiar el rol o quitar el acceso.'
+                ? 'Puedes cambiar el rol, definir la contraseña de acceso o quitar a alguien. La clave se la entregas tú (no se envía por correo).'
                 : 'Personas con cuenta vinculada a esta ficha.'}
             </p>
           <ul className="mt-2 grid gap-2">
@@ -267,6 +270,18 @@ export function CaregiversBoard({ patientId }: { patientId: string }) {
                         </select>
                         <button
                           type="button"
+                          onClick={() =>
+                            setPasswordTarget({
+                              email: member.email,
+                              label: member.fullName?.trim() || member.email,
+                            })
+                          }
+                          className="rounded-full px-3 py-1.5 text-sm font-bold text-blue-700 hover:bg-blue-50"
+                        >
+                          Contraseña
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => removeMember(member)}
                           className="rounded-full px-3 py-1.5 text-sm font-bold text-red-700 hover:bg-red-50"
                         >
@@ -295,8 +310,8 @@ export function CaregiversBoard({ patientId }: { patientId: string }) {
             <form data-jump="Invitar" onSubmit={invite} className="mt-6 rounded-2xl border border-slate-200 bg-white p-4">
               <h2 className="font-black">Invitar</h2>
               <p className="mt-1 text-sm text-slate-600">
-                Solo tú como dueño puedes invitar. El cuidador entra después con ese correo y crea su contraseña. Nombre y
-                teléfono quedan listos antes de que se registre.
+                Solo tú como dueño puedes invitar. Después define su contraseña aquí (botón Contraseña en pendientes o en
+                cuentas) y entrégasela; ella entra con Entrar en la app.
               </p>
               {role === 'caregiver' ? (
                 <>
@@ -376,7 +391,19 @@ export function CaregiversBoard({ patientId }: { patientId: string }) {
                             .join(' · ')}
                         </p>
                       </div>
-                      <div className="flex gap-1">
+                      <div className="flex flex-wrap gap-1">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPasswordTarget({
+                              email: inviteItem.email,
+                              label: inviteItem.name || inviteItem.email,
+                            })
+                          }
+                          className="rounded-full px-3 py-1.5 text-sm font-bold text-blue-700 hover:bg-blue-50"
+                        >
+                          Contraseña
+                        </button>
                         <button
                           type="button"
                           onClick={() => setEditingInvite(inviteItem)}
@@ -470,8 +497,119 @@ export function CaregiversBoard({ patientId }: { patientId: string }) {
         />
       ) : null}
 
+      {passwordTarget ? (
+        <SetAccessPassword
+          target={passwordTarget}
+          saving={saving}
+          error={formError}
+          onClose={() => {
+            setPasswordTarget(null)
+            setFormError(null)
+          }}
+          onSave={async (nextPassword) => {
+            setSaving(true)
+            setFormError(null)
+            try {
+              const result = await api<{ created?: boolean }>(`/api/patients/${patientId}/access/password`, {
+                method: 'POST',
+                body: JSON.stringify({ email: passwordTarget.email, nextPassword }),
+              })
+              setPasswordTarget(null)
+              showToast(
+                result.created
+                  ? 'Cuenta lista. Entrégale la clave para que entre con Entrar.'
+                  : 'Contraseña actualizada. Entrégasela para que entre con Entrar.',
+              )
+            } catch (reason) {
+              const message = errorText(reason)
+              if (message) setFormError(message)
+            } finally {
+              setSaving(false)
+            }
+          }}
+        />
+      ) : null}
+
       <Toast message={toast} />
     </div>
+  )
+}
+
+function SetAccessPassword({
+  target,
+  saving,
+  error,
+  onClose,
+  onSave,
+}: {
+  target: PasswordTarget
+  saving: boolean
+  error: string | null
+  onClose: () => void
+  onSave: (nextPassword: string) => void
+}) {
+  const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [localError, setLocalError] = useState<string | null>(null)
+
+  return (
+    <Modal title={`Contraseña de ${target.label}`} onClose={onClose}>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault()
+          setLocalError(null)
+          if (password !== confirm) {
+            setLocalError('La confirmación no coincide')
+            return
+          }
+          const strength = passwordError(password)
+          if (strength) {
+            setLocalError(strength)
+            return
+          }
+          onSave(password)
+        }}
+      >
+        <p className="text-sm text-slate-600">
+          Correo: <span className="font-semibold text-slate-800">{target.email}</span>. Mínimo {PASSWORD_MIN} caracteres,
+          con letras y un número. No se envía por correo: pásasela tú.
+        </p>
+        <FieldLabel htmlFor="owner-set-password">Contraseña</FieldLabel>
+        <input
+          id="owner-set-password"
+          type="password"
+          required
+          minLength={PASSWORD_MIN}
+          autoComplete="new-password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          className={fieldClass}
+        />
+        <FieldLabel htmlFor="owner-set-password-confirm">Confirmar</FieldLabel>
+        <input
+          id="owner-set-password-confirm"
+          type="password"
+          required
+          minLength={PASSWORD_MIN}
+          autoComplete="new-password"
+          value={confirm}
+          onChange={(event) => setConfirm(event.target.value)}
+          className={fieldClass}
+        />
+        {localError || error ? (
+          <p role="alert" className="mt-3 text-sm font-medium text-red-700">
+            {localError || error}
+          </p>
+        ) : null}
+        <button
+          type="submit"
+          disabled={saving}
+          className="mt-4 rounded-full bg-blue-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-60"
+        >
+          {saving ? 'Guardando…' : 'Guardar contraseña'}
+        </button>
+      </form>
+    </Modal>
   )
 }
 

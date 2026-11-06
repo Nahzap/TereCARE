@@ -67,15 +67,19 @@ export function ContributionChart({
       title="Aporte total equivalente"
       headline={
         hasLines
-          ? `${pesos(stats.equivalentAmount)} · ${pesos(stats.moneyAmount)} en dinero · ${pesos(stats.timeAmount)} en horas`
+          ? `${pesos(stats.equivalentAmount)} · ${pesos(stats.moneyAmount)} dinero · ${pesos(stats.timeAmount)} horas · ${pesos(stats.lunchAmount)} almuerzo`
           : undefined
       }
-      empty={!hasLines ? 'Todavía no hay dinero ni horas anotadas en este tramo.' : null}
+      empty={!hasLines ? 'Todavía no hay dinero, horas ni almuerzos anotados en este tramo.' : null}
       note={
         <>
-          Cada hora presencial se valoriza con la tarifa vigente al momento de anotarla ({formatHourRate(stats.currentRateClp)}{' '}
-          ahora). Un reajuste aplica solo a horas nuevas; no cambia el historial. {formatHours(stats.hours)} valorizadas.
-          Del {dayTitle(stats.from)} al {dayTitle(stats.to)}.
+          Cada hora presencial se valoriza con la tarifa vigente al anotarla ({formatHourRate(stats.currentRateClp)} ahora).
+          Los almuerzos suman su tarifa de día sellada, sin alterar la cobertura horaria. Un reajuste de hora aplica solo
+          a horas nuevas. {formatHours(stats.hours)} valorizadas
+          {stats.lunchDays > 0
+            ? ` · ${stats.lunchDays === 1 ? '1 día' : `${stats.lunchDays} días`} de almuerzo`
+            : ''}
+          . Del {dayTitle(stats.from)} al {dayTitle(stats.to)}.
         </>
       }
     >
@@ -157,7 +161,7 @@ export function ContributionChart({
                         value: pesos(value),
                         color: line.color,
                         sort: value,
-                        detail: `${pesos(line.money)} dinero · ${pesos(line.timeValue)} horas`,
+                        detail: `${pesos(line.money)} dinero · ${pesos(line.timeValue)} horas · ${pesos(line.lunchValue)} almuerzo`,
                       }
                     })
                     .sort((left, right) => right.sort - left.sort || left.label.localeCompare(right.label, 'es'))

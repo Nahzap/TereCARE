@@ -7,6 +7,7 @@ import { filterEvents, groupEventsByDay, type TimelineEvent, type TimelineKind }
 import type { AppointmentCount, CoverageStats, DayDoses, PressurePoint } from '@/lib/timeline/stats'
 import type { ContributionStats } from '@/lib/contributions/equivalent'
 import type { ExpenseStats } from '@/lib/expenses/expense'
+import type { LunchStats } from '@/lib/lunch/lunch'
 import type { Role } from '@/lib/domain'
 import { utcToLocalDateTime } from '@/lib/time/zoned'
 import { api, errorText } from '@/components/api'
@@ -16,6 +17,7 @@ import { ContributionChart } from '@/components/dashboard/contribution-chart'
 import { CoverageDaysChart, CoveragePeopleChart } from '@/components/dashboard/coverage-charts'
 import { DoseChart } from '@/components/dashboard/dose-chart'
 import { ExpenseDaysChart, ExpenseSplitChart } from '@/components/dashboard/expense-charts'
+import { LunchChart } from '@/components/dashboard/lunch-chart'
 import { PressureChart } from '@/components/dashboard/pressure-chart'
 import { RecordTable } from '@/components/dashboard/record-table'
 
@@ -30,6 +32,7 @@ type Payload = {
   coverage: CoverageStats | null
   expenses: ExpenseStats | null
   contributions: ContributionStats | null
+  lunches?: LunchStats | null
   nextAppointment: Appointment | null
   events: TimelineEvent[]
 }
@@ -127,22 +130,46 @@ export function PatientDashboard({ patientId }: { patientId: string }) {
               </ChartCard>
             )}
             {payload.contributions ? (
-              <div className="lg:col-span-2">
-                <ContributionChart
-                  patientId={patientId}
-                  stats={payload.contributions}
-                  today={payload.today}
-                  role={payload.role}
-                  onRateChange={(rateClp) =>
-                    setPayload((current) =>
-                      current?.contributions
-                        ? { ...current, contributions: { ...current.contributions, currentRateClp: rateClp } }
-                        : current,
-                    )
-                  }
-                />
-              </div>
+              <ContributionChart
+                patientId={patientId}
+                stats={payload.contributions}
+                today={payload.today}
+                role={payload.role}
+                onRateChange={(rateClp) =>
+                  setPayload((current) =>
+                    current?.contributions
+                      ? { ...current, contributions: { ...current.contributions, currentRateClp: rateClp } }
+                      : current,
+                  )
+                }
+              />
             ) : null}
+            {payload.lunches ? (
+              <LunchChart
+                patientId={patientId}
+                stats={payload.lunches}
+                today={payload.today}
+                role={payload.role}
+                onRateChange={(next) =>
+                  setPayload((current) =>
+                    current?.lunches
+                      ? {
+                          ...current,
+                          lunches: {
+                            ...current.lunches,
+                            currentRateClp: next.currentRateClp,
+                            currentHours: next.currentHours,
+                          },
+                        }
+                      : current,
+                  )
+                }
+              />
+            ) : (
+              <ChartCard title="Almuerzos valorizados" empty="Los almuerzos todavía no están listos.">
+                {null}
+              </ChartCard>
+            )}
             {payload.expenses ? <ExpenseSplitChart stats={payload.expenses} patientId={patientId} /> : null}
           </div>
           <section data-jump="Registro" className="flex flex-col gap-3">

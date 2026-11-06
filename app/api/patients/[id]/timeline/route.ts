@@ -6,8 +6,11 @@ import { asRows, mapSlot, normalizeDate, SLOT_COLUMNS, type SlotRow } from '@/li
 import { loadPeople, PeopleMissingError } from '@/lib/api/people'
 import { loadExpenses } from '@/lib/api/expenses'
 import { loadHourRates } from '@/lib/api/hour-rates'
+import { loadLunchRates } from '@/lib/api/lunch-rates'
+import { loadLunches } from '@/lib/api/lunches'
 import { loadSituation, SituationMissingError } from '@/lib/api/care-situation'
 import { contributionStats } from '@/lib/contributions/equivalent'
+import { lunchStats } from '@/lib/lunch/lunch'
 import { expenseHorizon, expenseStats, EXPENSE_DETAIL_LABEL, formatPesos } from '@/lib/expenses/expense'
 import { mapPressure, type PressureRow } from '@/lib/pressure/map'
 import type { CareSituation } from '@/lib/care/situation'
@@ -97,8 +100,26 @@ export async function GET(request: NextRequest, { params }: Context) {
     const todayStart = localDateTimeToUtc(`${today}T00:00`)
 
     const expenseWindow = expenseHorizon(range.from, range.to)
-    const [slotsResult, marksResult, pressureResult, appointmentsResult, nextResult, coverage, situation, expenses, rates] =
-      await Promise.all([
+    const peopleNames = await loadPeople(session.supabase, id)
+      .then((people) => new Map(people.map((person) => [person.id, person.name])))
+      .catch((error: unknown) => {
+        if (error instanceof PeopleMissingError) return new Map<string, string>()
+        throw error
+      })
+
+    const [
+      slotsResult,
+      marksResult,
+      pressureResult,
+      appointmentsResult,
+      nextResult,
+      coverage,
+      situation,
+      expenses,
+      rates,
+      lunchRates,
+      lunches,
+    ] = await Promise.all([
         session.supabase
           .from('medication_slots')
           .select(`${SLOT_COLUMNS}, created_at`)
@@ -136,6 +157,8 @@ export async function GET(request: NextRequest, { params }: Context) {
         }),
         loadExpenses(session.supabase, id),
         loadHourRates(session.supabase, id),
+        loadLunchRates(session.supabase, id),
+        loadLunches(session.supabase, id, expenseWindow.from, expenseWindow.to, peopleNames),
       ])
 
     for (const result of [slotsResult, marksResult, pressureResult, appointmentsResult, nextResult]) {
@@ -233,8 +256,15 @@ export async function GET(request: NextRequest, { params }: Context) {
 
     const expenseStatsPayload = expenses ? expenseStats(expenses, range.from, range.to, today) : null
     const hourRates = rates ?? []
+    const valuedLunches = (lunches ?? []).map((row) => ({
+      personId: row.personId,
+      caregiverName: row.caregiverName,
+      lunchOn: row.lunchOn,
+      rateClp: row.rateClp ?? 0,
+      hours: row.hours ?? 0,
+    }))
     const contributions =
-      expenses || coverage
+      expenses || coverage || lunches
         ? contributionStats({
             from: expenseWindow.from,
             to: expenseWindow.to,
@@ -246,7 +276,19 @@ export async function GET(request: NextRequest, { params }: Context) {
               coveredOn: row.coveredOn,
               rateClp: row.rateClp ?? 0,
             })),
+            lunches: valuedLunches,
             rates: hourRates,
+            situation: care,
+          })
+        : null
+    const lunchStatsPayload =
+      lunches && lunchRates
+        ? lunchStats({
+            from: range.from,
+            to: range.to,
+            today,
+            lunches: valuedLunches,
+            rates: lunchRates,
             situation: care,
           })
         : null
@@ -262,6 +304,7 @@ export async function GET(request: NextRequest, { params }: Context) {
       coverage: coverage ? coverageStats(coverage, range.from, range.to, care) : null,
       expenses: expenseStatsPayload,
       contributions,
+      lunches: lunchStatsPayload,
       nextAppointment: nextRow ? mapAppointment(nextRow) : null,
       events,
     })

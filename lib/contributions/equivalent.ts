@@ -25,7 +25,9 @@ export type ContributionLine = {
   color: string
   money: number
   timeValue: number
+  lunchValue: number
   hours: number
+  lunchDays: number
   total: number
 }
 
@@ -40,11 +42,20 @@ export type ContributionStats = {
   to: string
   moneyAmount: number
   timeAmount: number
+  lunchAmount: number
   hours: number
+  lunchDays: number
   equivalentAmount: number
   currentRateClp: number
   lines: ContributionLine[]
   cumulativeDays: ContributionDay[]
+}
+
+export type ValuedLunchDay = {
+  personId: string
+  caregiverName: string
+  lunchOn: string
+  rateClp: number
 }
 
 const LINE_COLORS = ['#0f766e', '#1d4ed8', '#c2410c', '#7c3aed', '#be123c', '#0369a1', '#a16207', '#334155']
@@ -79,6 +90,7 @@ export function contributionStats(input: {
   today: string
   expenses: readonly Expense[]
   hours: readonly ValuedCoverageHour[]
+  lunches?: readonly ValuedLunchDay[]
   rates: readonly HourRateRow[]
   situation?: CareSituation | null
 }): ContributionStats {
@@ -86,7 +98,9 @@ export function contributionStats(input: {
   const inWindow = new Set(days)
   const moneyByBuyerDay = new Map<string, Map<string, number>>()
   const timeByBuyerDay = new Map<string, Map<string, number>>()
+  const lunchByBuyerDay = new Map<string, Map<string, number>>()
   const hoursByBuyer = new Map<string, number>()
+  const lunchDaysByBuyer = new Map<string, number>()
   const names = new Map<string, string>()
 
   for (const expense of input.expenses) {
@@ -110,19 +124,34 @@ export function contributionStats(input: {
     hoursByBuyer.set(hour.personId, (hoursByBuyer.get(hour.personId) ?? 0) + 1)
   }
 
-  const personIds = new Set([...moneyByBuyerDay.keys(), ...timeByBuyerDay.keys()])
+  for (const lunch of input.lunches ?? []) {
+    if (dayCare(input.situation ?? null, lunch.lunchOn) !== 'home') continue
+    if (!inWindow.has(lunch.lunchOn)) continue
+    if (lunch.rateClp <= 0) continue
+    names.set(lunch.personId, lunch.caregiverName)
+    const byDay = lunchByBuyerDay.get(lunch.personId) ?? new Map<string, number>()
+    byDay.set(lunch.lunchOn, (byDay.get(lunch.lunchOn) ?? 0) + lunch.rateClp)
+    lunchByBuyerDay.set(lunch.personId, byDay)
+    lunchDaysByBuyer.set(lunch.personId, (lunchDaysByBuyer.get(lunch.personId) ?? 0) + 1)
+  }
+
+  const personIds = new Set([...moneyByBuyerDay.keys(), ...timeByBuyerDay.keys(), ...lunchByBuyerDay.keys()])
   const draft = [...personIds].map((personId) => {
     let money = 0
     let timeValue = 0
+    let lunchValue = 0
     for (const amount of moneyByBuyerDay.get(personId)?.values() ?? []) money += amount
     for (const amount of timeByBuyerDay.get(personId)?.values() ?? []) timeValue += amount
+    for (const amount of lunchByBuyerDay.get(personId)?.values() ?? []) lunchValue += amount
     return {
       key: personId,
       label: names.get(personId) ?? 'Cuidador',
       money,
       timeValue,
+      lunchValue,
       hours: hoursByBuyer.get(personId) ?? 0,
-      total: money + timeValue,
+      lunchDays: lunchDaysByBuyer.get(personId) ?? 0,
+      total: money + timeValue + lunchValue,
     }
   })
   draft.sort((left, right) => right.total - left.total || left.label.localeCompare(right.label, 'es'))
@@ -138,7 +167,9 @@ export function contributionStats(input: {
     let total = 0
     for (const line of lines) {
       const delta =
-        (moneyByBuyerDay.get(line.key)?.get(day) ?? 0) + (timeByBuyerDay.get(line.key)?.get(day) ?? 0)
+        (moneyByBuyerDay.get(line.key)?.get(day) ?? 0) +
+        (timeByBuyerDay.get(line.key)?.get(day) ?? 0) +
+        (lunchByBuyerDay.get(line.key)?.get(day) ?? 0)
       const next = (running.get(line.key) ?? 0) + delta
       running.set(line.key, next)
       amounts[line.key] = next
@@ -152,7 +183,9 @@ export function contributionStats(input: {
     to: input.to,
     moneyAmount: lines.reduce((sum, line) => sum + line.money, 0),
     timeAmount: lines.reduce((sum, line) => sum + line.timeValue, 0),
+    lunchAmount: lines.reduce((sum, line) => sum + line.lunchValue, 0),
     hours: lines.reduce((sum, line) => sum + line.hours, 0),
+    lunchDays: lines.reduce((sum, line) => sum + line.lunchDays, 0),
     equivalentAmount: lines.reduce((sum, line) => sum + line.total, 0),
     currentRateClp: currentHourRate(input.rates, input.today),
     lines,

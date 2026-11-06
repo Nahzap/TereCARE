@@ -31,3 +31,13 @@ export const passwordBodySchema = z
       })
     }
   })
+
+export const ownerAccessPasswordSchema = z.object({
+  email: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .pipe(z.email('Ese correo no es válido')),
+  nextPassword: z.string().min(1, 'Escribe la contraseña'),
+})
+

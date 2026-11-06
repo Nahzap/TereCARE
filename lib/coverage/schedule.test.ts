@@ -12,6 +12,7 @@ import {
   dedupeSlots,
   formatHours,
   insideRect,
+  canEditCarePerson,
   isAssignableRole,
   isTotalScope,
   joinNames,
@@ -125,6 +126,14 @@ describe('who can be assigned', () => {
     expect(isAssignableRole('viewer')).toBe(false)
   })
 
+  it('lets the owner edit anyone and caregivers only themselves', () => {
+    expect(canEditCarePerson('owner', 'me', { userId: 'other' })).toBe(true)
+    expect(canEditCarePerson('owner', 'me', { userId: null })).toBe(true)
+    expect(canEditCarePerson('caregiver', 'me', { userId: 'me' })).toBe(true)
+    expect(canEditCarePerson('caregiver', 'me', { userId: 'other' })).toBe(false)
+    expect(canEditCarePerson('caregiver', 'me', { userId: null })).toBe(false)
+    expect(canEditCarePerson('viewer', 'me', { userId: 'me' })).toBe(false)
+  })
 })
 
 describe('hours on the grid', () => {

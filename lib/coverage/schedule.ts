@@ -1,5 +1,6 @@
 import type { Role } from '@/lib/domain'
 import type { CarePerson } from '@/lib/coverage/people'
+import type { LunchSlot } from '@/lib/lunch/lunch'
 import { addDays, DAY_SHORT, MONTHS } from '@/lib/schedule/dates'
 
 export const COVERAGE_RADIUS_DAYS = 15
@@ -47,10 +48,22 @@ export type CoveragePayload = CoverageWindow & {
   role: Role
   people: CarePerson[]
   slots: CoverageSlot[]
+  lunches: LunchSlot[]
 }
 
 export function isAssignableRole(role: Role) {
   return role === 'owner' || role === 'caregiver'
+}
+
+/** Owners edit anyone. Caregivers may only change the person linked to their account. */
+export function canEditCarePerson(
+  role: Role,
+  actorUserId: string,
+  person: { userId: string | null },
+) {
+  if (role === 'owner') return true
+  if (role === 'caregiver') return person.userId != null && person.userId === actorUserId
+  return false
 }
 
 export function historyBounds(today: string) {

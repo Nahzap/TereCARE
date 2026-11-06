@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server'
 import { canEdit, context, jsonError, parseBody, requireRole, respond, type AppClient } from '@/lib/api/guard'
 import { asRows, normalizeDate } from '@/lib/api/map'
+import { loadLunches } from '@/lib/api/lunches'
 import { loadPeople, PEOPLE_MISSING, PeopleMissingError, peopleSchemaMissing } from '@/lib/api/people'
 import type { CarePerson } from '@/lib/coverage/people'
 import { coverageWriteSchema } from '@/lib/coverage/schema'
 import {
+  canEditCarePerson,
   COVERAGE_FUTURE_DAYS,
   coverageDateBlock,
   coverageView,
@@ -12,6 +14,7 @@ import {
   type CoveragePayload,
   type CoverageSlot,
 } from '@/lib/coverage/schedule'
+import type { LunchSlot } from '@/lib/lunch/lunch'
 import { todayISO } from '@/lib/schedule/dates'
 
 type Context = { params: Promise<{ id: string }> }
@@ -82,7 +85,10 @@ async function loadCoverage(
     if (batch.length < PAGE_SIZE) break
   }
 
-  return { role, ...visible, people, slots }
+  const lunches =
+    (await loadLunches(supabase, patientId, visible.from, visible.to, names)) ?? ([] as LunchSlot[])
+
+  return { role, ...visible, people, slots, lunches }
 }
 
 export async function GET(request: Request, { params }: Context) {
@@ -130,6 +136,9 @@ export async function PUT(request: Request, { params }: Context) {
       const people = await loadPeople(session.supabase, id)
       const person = people.find((entry) => entry.id === body.data.personId)
       if (!person) return jsonError('No encontramos a esa persona', 404)
+      if (!canEditCarePerson(access.role, session.user.id, person)) {
+        return jsonError('Solo puedes editar tu propio horario', 403)
+      }
       if (body.data.assigned && !person.assignable) return jsonError('Esa persona ya no es cuidadora', 400)
 
       const saved = await session.supabase.rpc('set_care_coverage', {
@@ -142,6 +151,9 @@ export async function PUT(request: Request, { params }: Context) {
       if (saved.error) {
         const message = saved.error.message ?? ''
         if (message.includes('No puedes editar')) return jsonError('No puedes editar el horario', 403)
+        if (message.includes('Solo puedes editar tu propio')) {
+          return jsonError('Solo puedes editar tu propio horario', 403)
+        }
         if (message.includes('Solo puedes asignar')) return jsonError('Solo puedes asignar a un cuidador', 400)
         if (message.includes('ventana')) {
           return jsonError(`Solo puedes marcar hasta ${COVERAGE_FUTURE_DAYS} días después de hoy`, 400)
