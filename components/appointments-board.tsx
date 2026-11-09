@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import {
   APPOINTMENT_STATUSES,
   appointmentDayLabel,
-  groupAppointments,
+  sortAppointmentsByStart,
   STATUS_LABEL,
   type AppointmentStatus,
 } from '@/lib/appointments/ordering'
@@ -88,10 +88,8 @@ export function AppointmentsBoard({ patientId }: { patientId: string }) {
       ...item,
       localDate: utcToLocalDateTime(item.startsAt).date,
     }))
-    const groups = groupAppointments(listed, today)
-    // Cercana → lejana en lo pendiente; historial cronológico al final.
-    return [...groups.overdue, ...groups.upcoming, ...groups.past]
-  }, [payload, today])
+    return sortAppointmentsByStart(listed)
+  }, [payload])
 
   function replaceAppointment(next: Appointment) {
     setPayload((current) =>
@@ -227,8 +225,8 @@ export function AppointmentsBoard({ patientId }: { patientId: string }) {
       <header>
         <h1 className="text-2xl font-black">Citas médicas</h1>
         <p className="text-sm text-slate-600">
-          Ordenadas por fecha y hora, de la más cercana a la más lejana, para seguir la trazabilidad del cuidado. Usa
-          Corregir para enmendar una cita ya anotada.
+          Ordenadas por fecha y hora, de la más antigua a la más reciente. Usa Corregir para enmendar una cita ya
+          anotada.
         </p>
       </header>
       {error ? <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p> : null}
