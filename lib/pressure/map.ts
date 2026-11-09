@@ -1,5 +1,5 @@
 import { personName } from '@/lib/api/map'
-import type { PressureBody } from './schema'
+import { caregiverFromNote, type PressureBody } from './schema'
 
 export type PressureReading = {
   id: string
@@ -45,7 +45,7 @@ export function mapPressure(row: PressureRow): PressureReading {
     dayPart,
     readingOrder,
     note: row.note ?? '',
-    recordedByName: personName(row.profiles),
+    recordedByName: caregiverFromNote(row.note) ?? personName(row.profiles),
   }
 }
 
@@ -57,13 +57,19 @@ export function pressureNumbers(body: PressureBody) {
   }
 }
 
-export function pressureWrite(body: PressureBody, measuredAt: string, readingOrder: number, recordedBy: string) {
+export function pressureWrite(
+  body: PressureBody,
+  measuredAt: string,
+  readingOrder: number | null,
+  recordedBy: string,
+  note = '',
+) {
   return {
     ...pressureNumbers(body),
     measured_at: measuredAt,
     day_part: null,
     reading_order: readingOrder,
-    note: '',
+    note,
     recorded_by: recordedBy,
   }
 }
