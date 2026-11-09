@@ -19,7 +19,6 @@ import {
   canEditCarePerson,
   caregiverColor,
   clampWindowStart,
-  COVERAGE_FUTURE_DAYS,
   COVERAGE_RADIUS_DAYS,
   COVERAGE_WEEK_DAYS,
   coverageDiff,
@@ -312,7 +311,6 @@ export function CoverageBoard({
       : (painters.find((painter) => painter.assignable && painter.userId === meId)?.personId ??
         painters.find((painter) => painter.assignable)?.personId ??
         null)
-  const activeId = erasing ? (selfOnly ? myPersonId : null) : preferredId
   const selected = painters.find((painter) => painter.personId === preferredId) ?? null
   const canPaintSelf = !selfOnly || myPersonId != null
   const chipNames = shortNames(painters.map((painter) => painter.name))

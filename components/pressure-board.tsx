@@ -31,7 +31,6 @@ export function PressureBoard({ patientId }: { patientId: string }) {
   const [timeDraft, setTimeDraft] = useState(parts.time)
   const [personId, setPersonId] = useState('')
   const canEdit = payload?.role === 'owner' || payload?.role === 'caregiver'
-  const people = payload?.people ?? []
   const nextOrder = nextOrderForDay(
     (payload?.readings ?? []).map((reading) => ({
       localDate: utcToLocalDateTime(reading.measuredAt).date,
@@ -39,6 +38,7 @@ export function PressureBoard({ patientId }: { patientId: string }) {
     })),
     dateDraft || todayISO(),
   )
+  const readingLabel = nextOrder <= 2 ? String(nextOrder) : '—'
 
   useEffect(() => {
     let cancelled = false
@@ -62,8 +62,8 @@ export function PressureBoard({ patientId }: { patientId: string }) {
   }, [patientId, reloadToken])
 
   const personOptions = useMemo(
-    () => [...people].sort((left, right) => left.name.localeCompare(right.name, 'es')),
-    [people],
+    () => [...(payload?.people ?? [])].sort((left, right) => left.name.localeCompare(right.name, 'es')),
+    [payload?.people],
   )
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
@@ -154,7 +154,9 @@ export function PressureBoard({ patientId }: { patientId: string }) {
               ))}
             </select>
           </label>
-          <p className="pb-2 text-xs font-semibold text-slate-500">Lectura #{nextOrder} del día de la medición</p>
+          <p className="pb-2 text-xs font-semibold text-slate-500">
+            Lectura {readingLabel === '—' ? 'extra del día' : `#${readingLabel} del día de la medición`}
+          </p>
         </div>
       ) : null}
 
@@ -175,7 +177,7 @@ export function PressureBoard({ patientId }: { patientId: string }) {
             {canEdit ? (
               <tr data-jump="Registrar" className="border-b border-blue-100 bg-blue-50/80">
                 <td className="px-3 py-3 text-sm font-black tabular-nums text-slate-900">{timeDraft}</td>
-                <td className="px-3 py-3 text-sm font-black tabular-nums text-slate-900">{nextOrder}</td>
+                <td className="px-3 py-3 text-sm font-black tabular-nums text-slate-900">{readingLabel}</td>
                 <td className="p-1">
                   <input
                     ref={systolicRef}
